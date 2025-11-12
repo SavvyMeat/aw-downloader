@@ -2,6 +2,7 @@ import { BaseTask } from './base_task.js'
 import Series from '#models/series'
 import Season from '#models/season'
 import Episode from '#models/episode'
+import Config from '#models/config'
 import axios from 'axios'
 import fs from 'fs/promises'
 import path from 'path'
@@ -27,13 +28,16 @@ export class UpdateMetadataTask extends BaseTask {
     // Initialize Sonarr service
     await this.sonarrService.initialize()
 
-    // Fetch monitored anime series from Sonarr
-    const animeSeries = await this.sonarrService.getMonitoredAnimeSeries()
+    const filterAnimeOnly = await Config.get<boolean>('sonarr_filter_anime_only') ?? true
 
-    logger.info('UpdateMetadata', `Found ${animeSeries.length} monitored anime series`)
+    const allSeries = await this.sonarrService.getAllSeries()
+    const monitoredSeries = allSeries
+        .filter((show) => show.monitored && (!filterAnimeOnly || show.seriesType.toLowerCase() === 'anime' ))
+
+    logger.info('UpdateMetadata', `Found ${monitoredSeries.length} monitored series to sync`)
 
     // Get all existing series IDs from Sonarr
-    const sonarrIds = animeSeries.map((show) => show.id)
+    const sonarrIds = monitoredSeries.map((show) => show.id)
 
     // Mark series as deleted if they're no longer in Sonarr or not monitored
     if (sonarrIds.length > 0) {
@@ -41,12 +45,10 @@ export class UpdateMetadataTask extends BaseTask {
         .whereNotNull('sonarr_id')
         .whereNotIn('sonarr_id', sonarrIds)
         .update({ deleted: true })
-      
-      logger.debug('UpdateMetadata', `Marked series not in Sonarr IDs ${sonarrIds.join(', ')} as deleted`)
     }
 
     // Sync each series with local database
-    for (const sonarrShow of animeSeries) {
+    for (const sonarrShow of monitoredSeries) {
       await this.syncSeries(sonarrShow)
     }
 

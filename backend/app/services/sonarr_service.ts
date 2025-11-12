@@ -51,7 +51,8 @@ export interface SonarrWantedRecord {
   episodeNumber: number
   title: string
   airDateUtc: string
-  monitored: boolean
+  monitored: boolean,
+  series: SonarrSeries
 }
 
 export interface SonarrWantedResponse {
@@ -277,6 +278,8 @@ export class SonarrService {
             pageSize,
             sortKey,
             sortDirection,
+            includeSeries: true,
+            monitored: true
           },
         }
       )
@@ -449,7 +452,6 @@ export class SonarrService {
     this.ensureHealthy()
 
     try {
-      logger.debug('SonarrService', `Triggering rescan for series ${seriesId}`)
       
       await axios.post(
         `${this.sonarrUrl}/api/v3/command`,
@@ -464,9 +466,8 @@ export class SonarrService {
         }
       )
 
-      logger.success('SonarrService', `Successfully triggered rescan for series ${seriesId}`)
     } catch (error) {
-      logger.error('SonarrService', `Failed to trigger rescan for series ${seriesId}`, error)
+      logger.error('SonarrService', `Failed to trigger rescan for series ${seriesId}`, error.message)
       throw new Error(`Failed to rescan series: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }

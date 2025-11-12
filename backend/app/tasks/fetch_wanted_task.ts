@@ -1,5 +1,6 @@
 import { BaseTask } from './base_task.js'
 import Episode from '#models/episode'
+import Config from '#models/config'
 import { getDownloadQueue } from '#services/download_queue'
 import { AnimeworldService } from '#services/animeworld_service'
 import { logger } from '#services/logger_service'
@@ -24,34 +25,18 @@ export class FetchWantedTask extends BaseTask {
     // Initialize Sonarr service
     await this.sonarrService.initialize()
 
+    // Check if we should filter only anime series
+    const filterAnimeOnly = await Config.get<boolean>('sonarr_filter_anime_only') ?? true
+
     // Fetch wanted/missing episodes from Sonarr
     const response = await this.sonarrService.getWantedMissingEpisodes(100, 'airDateUtc', 'descending')
 
     // Filter out episodes without valid seriesId
-    this.wantedEpisodes = response.records.filter(
-      (ep) => ep.seriesId && ep.seasonNumber !== undefined && ep.episodeNumber !== undefined
-    )
+    this.wantedEpisodes = response.records
+      .filter((ep) => ep.seriesId && ep.seasonNumber !== undefined && ep.episodeNumber !== undefined)
+      .filter((ep) => !filterAnimeOnly || ep.series?.seriesType === "anime" )
 
     logger.info('FetchWanted', `Found ${this.wantedEpisodes.length} wanted/missing episodes`)
-
-    // Log some details
-    const monitoredCount = this.wantedEpisodes.filter((ep) => ep.monitored).length
-    logger.info('FetchWanted', `Monitored: ${monitoredCount}, Total in Sonarr: ${response.totalRecords}`)
-
-    // Group by series for summary
-    const bySeries = this.wantedEpisodes.reduce(
-      (acc, ep) => {
-        const seriesKey = `Series-${ep.seriesId}`
-        if (!acc[seriesKey]) {
-          acc[seriesKey] = 0
-        }
-        acc[seriesKey]++
-        return acc
-      },
-      {} as Record<string, number>
-    )
-
-    logger.debug('FetchWanted', 'Missing episodes by series', bySeries)
 
     // Add missing episodes to download queue
     await this.addToDownloadQueue()
@@ -80,7 +65,7 @@ export class FetchWantedTask extends BaseTask {
           .first()
 
         if (!episode) {
-          logger.warning('FetchWanted', `Episode not found in database: Series ${wantedEp.seriesId} S${wantedEp.seasonNumber}E${wantedEp.episodeNumber}`)
+          logger.warning('FetchWanted', `Episode not found in database: Series ${wantedEp.series.title} S${wantedEp.seasonNumber}E${wantedEp.episodeNumber}`)
           continue
         }
 

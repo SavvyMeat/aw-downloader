@@ -328,12 +328,10 @@ export class DownloadEpisodesTask {
 
       // Trigger Sonarr rescan
       await sonarrService.rescanSeries(series.sonarrId)
-
-      logger.success('DownloadTask', `Triggered Sonarr rescan for series ${series.sonarrId}`)
-
+      logger.success('DownloadTask', `Successfully triggered rescan for ${series.title}`)
 
     } catch (error) {
-      logger.error('DownloadTask', 'Failed to copy file to Sonarr and trigger rescan', error)
+      logger.error('DownloadTask', 'Failed to copy file to Sonarr and trigger rescan', error.message)
       // Don't throw - the download was successful, just the copy/rescan failed
     }
   }
