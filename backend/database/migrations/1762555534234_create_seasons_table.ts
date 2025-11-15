@@ -12,6 +12,9 @@ export default class extends BaseSchema {
       table.integer('total_episodes').defaultTo(0)
       table.string('status').defaultTo('not_started') // not_started, downloading, completed
       table.date('release_date').nullable()
+      table.text('download_urls').nullable() // JSON array of anime identifiers (slugs after /play/)
+      table.integer('missing_episodes').defaultTo(0) // Number of missing episodes
+      table.boolean('deleted').defaultTo(false).notNullable()
 
       table.timestamp('created_at')
       table.timestamp('updated_at')

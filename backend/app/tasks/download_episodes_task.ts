@@ -149,18 +149,6 @@ export class DownloadEpisodesTask {
   }
   
   /**
-   * Get file size from URL
-   */
-  private static async getFileSize(url: string): Promise<number> {
-    const response = await axios.head(url)
-    const contentLength = response.headers['content-length']
-    if (!contentLength) {
-      throw new Error('Could not determine file size')
-    }
-    return parseInt(contentLength)
-  }
-
-  /**
    * Get file extension from URL or Content-Disposition header
    */
   private static async getFileInfo(url: string): Promise<{extension: string, size: number}> {

@@ -8,7 +8,14 @@ export default class Config extends BaseModel {
   @column()
   declare key: string
 
-  @column()
+  @column({
+    prepare: (value: string[] | null) => {
+      return JSON.stringify(value)
+    },
+    consume: (value: string | null) => {
+      return JSON.parse(value || 'null')
+    },
+  })
   declare value: string | null
 
   @column.dateTime({ autoCreate: true })
@@ -26,13 +33,7 @@ export default class Config extends BaseModel {
     if (!config?.value) {
       return null
     }
-    
-    try {
-      return JSON.parse(config.value) as T
-    } catch {
-      // If not valid JSON, return as string
-      return config.value as T
-    }
+    return JSON.parse(config.value) as T
   }
 
   /**
@@ -40,10 +41,8 @@ export default class Config extends BaseModel {
    * Automatically serializes the value as JSON
    */
   static async set(key: string, value: any): Promise<Config> {
-    const jsonValue = typeof value === 'string' ? value : JSON.stringify(value)
-    const config = await Config.firstOrNew({ key }, { value: jsonValue })
-    config.value = jsonValue
-    await config.save()
+    const jsonValue = JSON.stringify(value)
+    const config = await Config.updateOrCreate({ key }, { value: jsonValue })
     return config
   }
 }

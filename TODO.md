@@ -1,7 +1,7 @@
 - [ ] Hunter x Hunter da gestire stagioni assolute con pulsantino in dettaglio
 - [*] Estensione persa durante copia
-- [ ] chmod su /app/storage 
+- [?] chmod su /app/storage 
 - [ ] dub/sub con preferenza generale (sub/dub/dub con fallback su sub) + singolo su serie tv
 - [*] levare url lista a list
-- [ ] refresh dati da dettaglio che riscarica i link
+- [*] refresh dati da dettaglio che riscarica i link
 - [*] controllare ricerca part 2 (eminence in the shadow)

@@ -8,6 +8,7 @@ import { DateTime } from 'luxon'
 import axios from 'axios'
 import fs from 'fs/promises'
 import app from '@adonisjs/core/services/app'
+import path from 'path'
 
 export class MetadataSyncService {
   private sonarrService = getSonarrService()
@@ -16,43 +17,49 @@ export class MetadataSyncService {
   /**
    * Sync metadata for a single series
    */
-  async syncSeries(seriesId: number, refreshUrls: boolean = false): Promise<void> {
+  async syncSeries(sonarrId: number, refreshUrls: boolean = false): Promise<void> {
     await this.sonarrService.initialize()
-    
-    // Get series from database
-    const series = await Series.findOrFail(seriesId)
-    
-    if (!series.sonarrId) {
-      throw new Error(`Series ${seriesId} has no Sonarr ID`)
-    }
 
     // Get series data from Sonarr
-    const sonarrShow = await this.sonarrService.getSeriesById(series.sonarrId)
-    
+    const sonarrShow = await this.sonarrService.getSeriesById(sonarrId)
+
     logger.info('MetadataSync', `Syncing series: ${sonarrShow.title}`)
-    
-    await this.syncSeriesData(series, sonarrShow)
-    await this.syncSeasons(series.id, sonarrShow.id, sonarrShow.seasons, refreshUrls)
-    
+
+    const serie = await this.syncSeriesFromSonarr(sonarrShow)
+    const seasons = await this.syncSeasonsFromSonarr(
+      serie,
+      sonarrShow.id,
+      sonarrShow.seasons,
+      refreshUrls
+    )
+
+    for (const currentSeason of seasons) {
+      await this.syncEpisodes(serie.id, currentSeason, serie.sonarrId, currentSeason.seasonNumber)
+    }
+
     logger.success('MetadataSync', `Successfully synced series: ${sonarrShow.title}`)
   }
 
   /**
    * Sync series data (title, poster, etc.)
    */
-  private async syncSeriesData(series: Series, sonarrShow: SonarrSeries): Promise<void> {
+  public async syncSeriesFromSonarr(sonarrShow: SonarrSeries): Promise<Series> {
+    // Check if series already exists
+    let series = await Series.findBy('sonarr_id', sonarrShow.id)
+
+    // Map Sonarr status to our status
     const status = this.mapStatus(sonarrShow.status)
 
     // Download and save poster image
-    let posterPath: string | null = series.posterPath
+    let posterPath: string | null = null
     let shouldDownloadPoster = true
 
     // Check if we should download the poster
-    if (series.posterPath && series.posterDownloadedAt) {
+    if (series?.posterPath && series?.posterDownloadedAt) {
       const hoursSinceLastDownload = DateTime.now().diff(series.posterDownloadedAt, 'hours').hours
       if (hoursSinceLastDownload < 48) {
         shouldDownloadPoster = false
-        logger.debug('MetadataSync', `Skipping poster download: last downloaded ${Math.floor(hoursSinceLastDownload)} hours ago`)
+        posterPath = series.posterPath
       }
     }
 
@@ -63,170 +70,134 @@ export class MetadataSyncService {
       }
     }
 
-    // Format alternate titles and genres as JSON
+    // Format alternate titles as JSON string (keep full objects with sceneSeasonNumber)
     const alternateTitles = JSON.stringify(sonarrShow.alternateTitles)
+
+    // Format genres as JSON string
     const genres = JSON.stringify(sonarrShow.genres)
 
-    // Update series
-    series.merge({
+    const seriesData = {
+      sonarrId: sonarrShow.id,
       title: sonarrShow.title,
       description: sonarrShow.overview || null,
       status,
       totalSeasons: sonarrShow.seasons.length,
       posterPath,
-      posterDownloadedAt: shouldDownloadPoster && posterPath ? DateTime.now() : series.posterDownloadedAt,
+      posterDownloadedAt:
+        shouldDownloadPoster && posterPath ? DateTime.now() : series?.posterDownloadedAt || null,
       alternateTitles,
       genres,
       year: sonarrShow.year || null,
       network: sonarrShow.network || null,
-      deleted: false,
-    })
-    
-    await series.save()
-    logger.info('MetadataSync', `Updated series data for: ${sonarrShow.title}`)
+      deleted: false, // Reset deleted flag if series is back in Sonarr
+    }
+
+    if (series) {
+      // Update existing series
+      series.merge(seriesData)
+      await series.save()
+      logger.info('UpdateMetadata', `Updated series: ${sonarrShow.title}`)
+    } else {
+      // Create new series
+      series = await Series.create(seriesData)
+      logger.success('UpdateMetadata', `Created series: ${sonarrShow.title}`)
+    }
+
+    return series
   }
 
-  /**
-   * Sync seasons for a series
-   */
-  private async syncSeasons(
-    seriesId: number,
+  public async syncSeasonsFromSonarr(
+    series: Series,
     sonarrSeriesId: number,
     sonarrSeasons: SonarrSeries['seasons'],
-    refreshUrls: boolean = false
-  ): Promise<void> {
-    for (const sonarrSeason of sonarrSeasons) {
-      // Skip specials (season 0)
-      if (sonarrSeason.seasonNumber === 0) {
-        continue
-      }
+    forceRefresh: boolean = false
+  ): Promise<Season[]> {
+    // Filter only monitored seasons and exclude season 0 (specials)
+    const candidateSeasons = sonarrSeasons.filter(
+      (season) => season.monitored && season.seasonNumber > 0
+    )
 
-      // Check if season has valid episodes before creating/updating
+    // Filter seasons with valid episodes (async check)
+    const monitoredSeasons = []
+    for (const sonarrSeason of candidateSeasons) {
       const hasValidEpisodes = await this.sonarrService.seasonHasValidEpisodes(
         sonarrSeriesId,
         sonarrSeason.seasonNumber
       )
-
-      if (!hasValidEpisodes) {
-        logger.debug('MetadataSync', `Skipping season ${sonarrSeason.seasonNumber}: no valid episodes`)
-        continue
+      if (hasValidEpisodes) {
+        monitoredSeasons.push(sonarrSeason)
       }
+    }
 
+    // Get season numbers from Sonarr (monitored seasons with valid episodes)
+    const sonarrSeasonNumbers = monitoredSeasons.map((season) => season.seasonNumber)
+
+    // Mark seasons as deleted if they're no longer monitored or no longer in Sonarr
+    if (sonarrSeasonNumbers.length > 0) {
+      await Season.query()
+        .where('series_id', series.id)
+        .whereNotIn('season_number', sonarrSeasonNumbers)
+        .update({ deleted: true })
+    } else {
+      // If no monitored seasons, mark all as deleted
+      await Season.query().where('series_id', series.id).update({ deleted: true })
+    }
+
+    const syncedSeasons: Season[] = []
+
+    for (const sonarrSeason of monitoredSeasons) {
+      // Check if season already exists
       let season = await Season.query()
-        .where('series_id', seriesId)
+        .where('series_id', series.id)
         .where('season_number', sonarrSeason.seasonNumber)
         .first()
 
+      // Calculate missing episodes
+      // episodeCount = episodes already aired
+      // episodeFileCount = episodes downloaded
+      // We only consider aired episodes, not future ones
+      const airedEpisodes = sonarrSeason.statistics?.episodeCount || 0
+      const downloadedEpisodes = sonarrSeason.statistics?.episodeFileCount || 0
+      const totalEpisodes = sonarrSeason.statistics?.totalEpisodeCount || 0
+      const missingEpisodes = Math.max(0, airedEpisodes - downloadedEpisodes)
+
       const seasonData = {
-        seriesId,
+        seriesId: series.id,
         seasonNumber: sonarrSeason.seasonNumber,
-        totalEpisodes: sonarrSeason.statistics?.episodeCount || 0,
-        missingEpisodes: sonarrSeason.statistics
-          ? sonarrSeason.statistics.episodeCount - sonarrSeason.statistics.episodeFileCount
-          : 0,
-        releaseDate: sonarrSeason.statistics?.previousAiring
-          ? DateTime.fromISO(sonarrSeason.statistics.previousAiring)
-          : null,
+        title: `Stagione ${sonarrSeason.seasonNumber}`,
+        totalEpisodes,
+        missingEpisodes,
+        status:
+          missingEpisodes === 0 && airedEpisodes > 0
+            ? ('completed' as const)
+            : ('not_started' as const),
+        deleted: false, // Reset deleted flag if season is back in Sonarr and monitored
       }
 
       if (season) {
+        // Update existing season
         season.merge(seasonData)
         await season.save()
-        logger.debug('MetadataSync', `Updated season ${sonarrSeason.seasonNumber}`)
       } else {
+        // Create new season
         season = await Season.create(seasonData)
-        logger.debug('MetadataSync', `Created season ${sonarrSeason.seasonNumber}`)
       }
 
       // Try to find AnimeWorld URL if not already set
-      if (!season.downloadUrls || season.downloadUrls.length === 0 || refreshUrls) {
-        await this.findAnimeWorldUrls(seriesId, season.id, sonarrSeason.seasonNumber)
+      if (!season.downloadUrls || season.downloadUrls.length === 0 || forceRefresh) {
+        await this.searchAndSetAnimeworldUrl(
+          season,
+          series.title,
+          series.alternateTitles,
+          sonarrSeason.seasonNumber
+        )
       }
 
-      // Sync episodes for this season
-      await this.syncEpisodes(seriesId, season.id, sonarrSeriesId, sonarrSeason.seasonNumber)
+      syncedSeasons.push(season)
     }
-  }
 
-  /**
-   * Find AnimeWorld URLs for a season
-   */
-  private async findAnimeWorldUrls(
-    seriesId: number,
-    seasonId: number,
-    seasonNumber: number
-  ): Promise<void> {
-    try {
-      const series = await Series.findOrFail(seriesId)
-      const season = await Season.findOrFail(seasonId)
-
-      logger.debug('MetadataSync', `Searching AnimeWorld for season ${seasonNumber}`)
-
-      // Parse alternate titles
-      let alternateTitles: Array<{ title: string; sceneSeasonNumber: number }> = []
-      if (series.alternateTitles) {
-        try {
-          alternateTitles = JSON.parse(series.alternateTitles)
-        } catch {
-          alternateTitles = []
-        }
-      }
-
-      // Build list of titles to try (main title + alternates for this season)
-      const titlesToTry: Array<{ title: string; priority: number }> = [
-        { title: series.title, priority: 0 },
-      ]
-
-      // Add alternate titles that match this season
-      for (const altTitle of alternateTitles) {
-        if (altTitle.sceneSeasonNumber === seasonNumber || altTitle.sceneSeasonNumber === -1) {
-          titlesToTry.push({
-            title: altTitle.title,
-            priority: altTitle.sceneSeasonNumber === seasonNumber ? 1 : 2,
-          })
-        }
-      }
-
-      // Sort by priority (lower is better)
-      titlesToTry.sort((a, b) => a.priority - b.priority)
-
-      // Try each title
-      for (const titleInfo of titlesToTry) {
-        const searchKeyword = seasonNumber === 1 
-          ? titleInfo.title
-          : `${titleInfo.title} ${seasonNumber}`
-        
-        logger.debug('MetadataSync', `Searching AnimeWorld for: ${searchKeyword}`)
-        
-        const searchResults = await this.animeworldService.searchAnime(searchKeyword)
-        
-        if (searchResults.length === 0) {
-          continue
-        }
-
-        const matches = this.animeworldService.findBestMatchWithParts(searchResults, searchKeyword)
-        
-        if (!matches || matches.length === 0) {
-          continue
-        }
-
-        // Get identifiers for all parts
-        const animeIdentifiers: string[] = []
-        for (const match of matches) {
-          const identifier = this.animeworldService.getAnimeIdentifier(match.link, match.identifier)
-          animeIdentifiers.push(identifier)
-        }
-        
-        season.downloadUrls = animeIdentifiers
-        await season.save()
-        
-        return
-      }
-      
-      logger.warning('MetadataSync', `Could not find AnimeWorld URL for season ${seasonNumber}`)
-    } catch (error) {
-      logger.error('MetadataSync', `Error searching AnimeWorld for season ${seasonNumber}`, error)
-    }
+    logger.info('UpdateMetadata', `Synced ${monitoredSeasons.length} seasons for ${series.title}`)
+    return syncedSeasons
   }
 
   /**
@@ -234,46 +205,157 @@ export class MetadataSyncService {
    */
   private async syncEpisodes(
     seriesId: number,
-    seasonId: number,
+    season: Season,
     sonarrSeriesId: number,
     seasonNumber: number
   ): Promise<void> {
     try {
+      // Fetch episodes from Sonarr for this series
       const sonarrEpisodesAll = await this.sonarrService.getSeriesEpisodes(sonarrSeriesId)
+
       const sonarrEpisodes = sonarrEpisodesAll.filter((ep) => ep.seasonNumber === seasonNumber)
 
+      const now = DateTime.now()
+
       for (const sonarrEpisode of sonarrEpisodes) {
+        // Check if episode already exists
         let episode = await Episode.query()
-          .where('season_id', seasonId)
-          .where('episode_number', sonarrEpisode.episodeNumber)
+          .where('series_id', seriesId)
+          .where('season_id', season.id)
+          .where('sonarr_id', sonarrEpisode.id)
           .first()
+
+        // Determine aired status
+        let airedStatus: 'aired' | 'not_aired' = 'not_aired'
+        if (sonarrEpisode.airDateUtc) {
+          const airDate = DateTime.fromISO(sonarrEpisode.airDateUtc)
+          airedStatus = airDate <= now ? 'aired' : 'not_aired'
+        }
+
+        // Determine disk status
+        const diskStatus: 'downloaded' | 'missing' = sonarrEpisode.hasFile
+          ? 'downloaded'
+          : 'missing'
 
         const episodeData = {
           seriesId,
-          seasonId,
-          sonarrId: sonarrEpisode.id,
+          seasonId: season.id,
           seasonNumber,
+          sonarrId: sonarrEpisode.id,
           episodeNumber: sonarrEpisode.episodeNumber,
           title: sonarrEpisode.title,
-          overview: sonarrEpisode.overview || null,
           airDateUtc: sonarrEpisode.airDateUtc ? DateTime.fromISO(sonarrEpisode.airDateUtc) : null,
-          hasFile: sonarrEpisode.hasFile,
+          airedStatus,
+          diskStatus,
           monitored: sonarrEpisode.monitored,
-          airedStatus: (sonarrEpisode.airDateUtc && DateTime.fromISO(sonarrEpisode.airDateUtc) <= DateTime.now() ? 'aired' : 'not_aired') as 'aired' | 'not_aired',
-          diskStatus: (sonarrEpisode.hasFile ? 'downloaded' : 'missing') as 'missing' | 'downloaded',
         }
 
         if (episode) {
+          // Update existing episode
           episode.merge(episodeData)
           await episode.save()
         } else {
+          // Create new episode
           await Episode.create(episodeData)
         }
       }
 
-      logger.debug('MetadataSync', `Synced ${sonarrEpisodes.length} episodes for season ${seasonNumber}`)
+      logger.info(
+        'UpdateMetadata',
+        `Synced ${sonarrEpisodes.length} episodes for season ${seasonNumber} of series ${seriesId}`
+      )
     } catch (error) {
-      logger.error('MetadataSync', `Error syncing episodes for season ${seasonNumber}`, error)
+      logger.error(
+        'UpdateMetadata',
+        `Error syncing episodes for series ${seriesId}, season ${seasonNumber}`,
+        error
+      )
+    }
+  }
+
+  private async searchAndSetAnimeworldUrl(
+    season: Season,
+    seriesTitle: string,
+    alternateTitles: string | null,
+    seasonNumber: number
+  ): Promise<void> {
+    try {
+      // Build list of titles to try with metadata about their origin
+      const titlesToTry: Array<{ title: string; isSeasonSpecific: boolean }> = [
+        { title: seriesTitle, isSeasonSpecific: false },
+      ]
+
+      // Add alternate titles if available, filtering by sceneSeasonNumber
+      if (alternateTitles) {
+        try {
+          const alternates = JSON.parse(alternateTitles) as Array<{
+            title: string
+            sceneSeasonNumber: number
+          }>
+
+          // Filter: include titles where sceneSeasonNumber < 0 (all seasons)
+          // or sceneSeasonNumber === seasonNumber (specific season)
+          const relevantAlternates = alternates
+            .filter((alt) => alt.sceneSeasonNumber < 0 || alt.sceneSeasonNumber === seasonNumber)
+            .map((alt) => ({
+              title: alt.title,
+              isSeasonSpecific: alt.sceneSeasonNumber >= 0,
+            }))
+
+          titlesToTry.push(...relevantAlternates)
+        } catch {
+          // Ignore JSON parse errors
+        }
+      }
+
+      // Try each title
+      for (const titleInfo of titlesToTry) {
+        // Build search keyword: append season number only if > 1 AND not using a season-specific alternate title
+        const searchKeyword =
+          seasonNumber > 1 && !titleInfo.isSeasonSpecific
+            ? `${titleInfo.title} ${seasonNumber}`
+            : titleInfo.title
+
+        logger.debug('UpdateMetadata', `Searching AnimeWorld for: ${searchKeyword}`)
+
+        const searchResults = await this.animeworldService.searchAnime(searchKeyword)
+
+        if (searchResults.length === 0) {
+          continue // Try next title
+        }
+
+        // Find best match and all related parts
+        const matches = this.animeworldService.findBestMatchWithParts(searchResults, searchKeyword)
+
+        if (!matches || matches.length === 0) {
+          continue // Try next title
+        }
+
+        // Get anime identifiers for all parts (store identifiers not full URLs)
+        const animeIdentifiers: string[] = []
+        for (const match of matches) {
+          const identifier = this.animeworldService.getAnimeIdentifier(match.link, match.identifier)
+          animeIdentifiers.push(identifier)
+        }
+
+        // Save identifiers to season's downloadUrls (will be automatically JSON encoded)
+        season.downloadUrls = animeIdentifiers
+        await season.save()
+
+        logger.success(
+          'UpdateMetadata',
+          `Set ${animeIdentifiers.length} AnimeWorld identifier(s) for ${season.title} season ${seasonNumber}`
+        )
+        return // Success, exit
+      }
+
+      logger.warning(
+        'UpdateMetadata',
+        `Could not find AnimeWorld URL for ${season.title} season ${seasonNumber} after trying ${titlesToTry.length} titles`
+      )
+    } catch (error) {
+      logger.error('UpdateMetadata', `Error searching AnimeWorld for season ${seasonNumber}`, error)
+      // Don't throw - just log and continue
     }
   }
 
@@ -284,18 +366,18 @@ export class MetadataSyncService {
     try {
       const response = await axios.get(posterUrl, { responseType: 'arraybuffer' })
       const buffer = Buffer.from(response.data)
-      
+
       const posterDir = app.makePath('storage/posters')
       await fs.mkdir(posterDir, { recursive: true })
-      
-      const filename = `series_${seriesId}.jpg`
-      const posterPath = `posters/${filename}`
-      const fullPath = app.makePath('storage', posterPath)
-      
+
+      const ext = path.extname(posterUrl) || '.jpg'
+      const filename = `series_${seriesId}.${ext}`
+      const fullPath = path.join(posterDir, filename)
+
       await fs.writeFile(fullPath, buffer)
-      
+
       logger.debug('MetadataSync', `Downloaded poster for series ${seriesId}`)
-      return posterPath
+      return filename
     } catch (error) {
       logger.error('MetadataSync', `Error downloading poster for series ${seriesId}`, error)
       return null

@@ -8,7 +8,7 @@ export default class Series extends BaseModel {
   declare id: number
 
   @column()
-  declare sonarrId: number | null
+  declare sonarrId: number
 
   @column()
   declare title: string

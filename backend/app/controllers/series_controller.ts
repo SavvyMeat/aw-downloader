@@ -154,9 +154,15 @@ export default class SeriesController {
   async syncMetadata({ params, response }: HttpContext) {
     try {
       const seriesId = params.id
+      const { sonarrId } = await Series.findOrFail(seriesId)
+
+      if ( !sonarrId ) {
+        return response.badRequest({ message: 'Series does not have a Sonarr ID' })
+      }
+
       const metadataSyncService = new MetadataSyncService()
       
-      await metadataSyncService.syncSeries(seriesId)
+      await metadataSyncService.syncSeries(sonarrId, true)
       
       return response.ok({ 
         message: 'Metadata synced successfully',
