@@ -1,0 +1,16 @@
+services:
+  aw-downloader:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    image: aw-downloader:latest
+    container_name: aw-downloader
+    ports:
+      - "6547:6547"
+    volumes:
+      - ./config:/app/storage
+      ## TV Shows folders
+      - ./tvseries:/data
+    environment:
+      - APP_KEY=
+    restart: unless-stopped

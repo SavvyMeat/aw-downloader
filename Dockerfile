@@ -43,4 +43,4 @@ COPY --chown=node:node --from=build_frontend /app/build/ ./public/
 COPY --chown=node:node entrypoint.sh .
 RUN chmod +x entrypoint.sh
 EXPOSE 6547
-CMD [ "sh", "entrypoint.sh" ]
+ENTRYPOINT ["/app/entrypoint.sh"]
