@@ -506,6 +506,16 @@ export async function getSonarrStatus(): Promise<SonarrHealthStatus> {
   return response.json();
 }
 
+export interface AppVersion {
+  version: string;
+}
+
+export async function fetchAppVersion(): Promise<AppVersion> {
+  const response = await fetch(`${API_BASE_URL}/api/health/version`);
+  if (!response.ok) throw new Error("Failed to fetch app version");
+  return response.json();
+}
+
 // ============================================
 // SONARR TAGS API
 // ============================================

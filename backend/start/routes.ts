@@ -87,6 +87,7 @@ router.group(() => {
     router.get('/sonarr', [HealthController, 'checkSonarr'])
     router.post('/sonarr/force', [HealthController, 'forceSonarrCheck'])
     router.get('/sonarr/status', [HealthController, 'getSonarrStatus'])
+    router.get('/version', [HealthController, 'getVersion'])
   }).prefix('/health')
 
   // Sonarr routes

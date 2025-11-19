@@ -21,9 +21,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
-
-// Application version
-const APP_VERSION = "1.0.0";
+import { fetchAppVersion } from "@/lib/api";
 
 const menuItems = [
   {
@@ -50,8 +48,13 @@ const menuItems = [
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname();
+  const [version, setVersion] = React.useState<string>("dev");
 
-
+  React.useEffect(() => {
+    fetchAppVersion()
+      .then((data) => setVersion(data.version))
+      .catch(() => setVersion("dev"));
+  }, []);
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -68,7 +71,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                     AW Downloader
                   </span>
                   <span className="truncate text-xs text-muted-foreground">
-                    v{APP_VERSION}
+                    {version}
                   </span>
                 </div>
               </Link>

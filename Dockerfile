@@ -31,11 +31,12 @@ FROM dependencies_frontend AS build_frontend
 RUN npm run build
 
 FROM base AS production
+ARG APP_VERSION=dev
 ENV NODE_ENV=production
 ENV PORT=6547
 ENV HOST=0.0.0.0
 ENV LOG_LEVEL=info
-ENV APP_KEY=X84YyWpm45JJgmvYsv2szdbDsBl45SSn
+ENV APP_VERSION=${APP_VERSION}
 COPY --chown=node:node ./backend/package*.json ./
 RUN npm ci --production
 COPY --chown=node:node --from=build /app/build .

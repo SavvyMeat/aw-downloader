@@ -1,5 +1,6 @@
 import { HttpContext } from '@adonisjs/core/http'
 import { SonarrService } from '#services/sonarr_service'
+import env from '#start/env'
 
 export default class HealthController {
   /**
@@ -38,6 +39,15 @@ export default class HealthController {
     return response.json({
       healthy: status.healthy,
       lastCheck: status.lastCheck,
+    })
+  }
+
+  /**
+   * Get application version
+   */
+  async getVersion({ response }: HttpContext) {
+    return response.json({
+      version: env.get('APP_VERSION', 'dev'),
     })
   }
 }
