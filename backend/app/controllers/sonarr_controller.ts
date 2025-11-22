@@ -20,4 +20,23 @@ export default class SonarrController {
       })
     }
   }
+
+  /**
+   * Get all notifications from Sonarr
+   */
+  async getNotifications({ response }: HttpContext) {
+    try {
+      const sonarrService = getSonarrService()
+      await sonarrService.initialize()
+      
+      const notifications = await sonarrService.getNotifications()
+      
+      return response.json(notifications)
+    } catch (error) {
+      return response.status(500).json({ 
+        message: 'Failed to fetch notifications from Sonarr',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+    }
+  }
 }

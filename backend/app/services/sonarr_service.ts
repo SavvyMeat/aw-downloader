@@ -78,6 +78,34 @@ export interface SonarrTag {
   label: string
 }
 
+export interface SonarrNotificationConfig {
+  id: number
+  name: string
+  implementation: string
+  configContract: string
+  onGrab: boolean
+  onDownload: boolean
+  onUpgrade: boolean
+  onRename: boolean
+  onSeriesDelete: boolean
+  onEpisodeFileDelete: boolean
+  onEpisodeFileDeleteForUpgrade: boolean
+  onHealthIssue: boolean
+  onApplicationUpdate: boolean
+  supportsOnGrab: boolean
+  supportsOnDownload: boolean
+  supportsOnUpgrade: boolean
+  supportsOnRename: boolean
+  supportsOnSeriesDelete: boolean
+  supportsOnEpisodeFileDelete: boolean
+  supportsOnEpisodeFileDeleteForUpgrade: boolean
+  supportsOnHealthIssue: boolean
+  supportsOnApplicationUpdate: boolean
+  includeHealthWarnings: boolean
+  tags: number[]
+  fields: any[]
+}
+
 interface SeriesCache {
   series: SonarrSeries
   timestamp: number
@@ -392,6 +420,27 @@ export class SonarrService {
       return response.data
     } catch (error) {
       logger.error('SonarrService', 'Error fetching tags from Sonarr', error.message)
+      throw error
+    }
+  }
+
+  /**
+   * Get all notifications from Sonarr
+   */
+  async getNotifications(): Promise<SonarrNotificationConfig[]> {
+    this.ensureInitialized()
+    this.ensureHealthy()
+
+    try {
+      const response = await axios.get<SonarrNotificationConfig[]>(`${this.sonarrUrl}/api/v3/notification`, {
+        headers: {
+          'X-Api-Key': this.sonarrToken,
+        },
+      })
+
+      return response.data
+    } catch (error) {
+      logger.error('SonarrService', 'Error fetching notifications from Sonarr', error.message)
       throw error
     }
   }
