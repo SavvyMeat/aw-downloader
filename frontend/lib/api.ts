@@ -542,3 +542,30 @@ export async function fetchSonarrTags(): Promise<SonarrTag[]> {
   if (!response.ok) throw new Error("Failed to fetch Sonarr tags");
   return response.json();
 }
+
+// ============================================
+// SONARR NOTIFICATIONS API
+// ============================================
+
+export interface SonarrNotification {
+  id: number;
+  name: string;
+  implementation: string;
+  configContract: string;
+  onGrab: boolean;
+  onDownload: boolean;
+  onUpgrade: boolean;
+  onRename: boolean;
+  supportsOnGrab: boolean;
+  supportsOnDownload: boolean;
+  supportsOnUpgrade: boolean;
+  supportsOnRename: boolean;
+  tags: number[];
+  fields: Array<{ name: string; value: any }>;
+}
+
+export async function fetchSonarrNotifications(): Promise<SonarrNotification[]> {
+  const response = await fetch(`${API_BASE_URL}/api/sonarr/notifications`);
+  if (!response.ok) throw new Error("Failed to fetch Sonarr notifications");
+  return response.json();
+}

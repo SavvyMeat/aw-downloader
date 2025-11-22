@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MultiSelect } from "@/components/ui/multi-select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Clock, Save, Loader2, Server, Settings2, AlertTriangle, RefreshCw, FolderOpen, Pencil, Check, X, AlertTriangleIcon } from "lucide-react";
+import { Clock, Save, Loader2, Server, Settings2, AlertTriangle, RefreshCw, FolderOpen, Pencil, Check, X, AlertTriangleIcon, Bell } from "lucide-react";
 import { toast } from "sonner";
 import { debounce } from "lodash";
 import {
@@ -22,8 +22,10 @@ import {
   updateRootFolderMapping,
   forceSonarrHealthCheck,
   fetchSonarrTags,
+  fetchSonarrNotifications,
   type RootFolder,
   type SonarrTag,
+  type SonarrNotification,
 } from "@/lib/api";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
@@ -106,6 +108,7 @@ export default function ImpostazioniPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [intervals, setIntervals] = useState<Record<string, number>>({});
   const [sonarrTags, setSonarrTags] = useState<Array<{ value: string; label: string }>>([]);
+  const [notifications, setNotifications] = useState<SonarrNotification[]>([]);
   const [configs, setConfigs] = useState<Configs>({});
   const [configInputs, setConfigInputs] = useState<ConfigInputs>({
     sonarr_url: "",
@@ -127,6 +130,7 @@ export default function ImpostazioniPage() {
   // Use transitions for loading states
   const [isSavingConfig, startSavingConfig] = useTransition();
   const [isSyncingRootFolders, startSyncingRootFolders] = useTransition();
+  const [isSyncingNotifications, startSyncingNotifications] = useTransition();
   const [savingConfigKey, setSavingConfigKey] = useState<string | null>(null);
 
   // Calculate total concurrent requests
@@ -190,6 +194,7 @@ export default function ImpostazioniPage() {
     fetchConfigsList();
     fetchRootFoldersList();
     fetchSonarrTagsList();
+    fetchNotificationsList();
   }, []);
 
   // Handler for config changes (download workers, concurrent downloads)
@@ -292,6 +297,15 @@ export default function ImpostazioniPage() {
     }
   };
 
+  const fetchNotificationsList = async () => {
+    try {
+      const data = await fetchSonarrNotifications();
+      setNotifications(data);
+    } catch (err) {
+      console.error("Error fetching notifications:", err);
+    }
+  };
+
   const handleSyncRootFolders = () => {
     startSyncingRootFolders(async () => {
       try {
@@ -308,6 +322,18 @@ export default function ImpostazioniPage() {
         toast.success(result.message);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Errore sincronizzazione. Verifica che Sonarr sia raggiungibile.");
+      }
+    });
+  };
+
+  const handleSyncNotifications = () => {
+    startSyncingNotifications(async () => {
+      try {
+        const data = await fetchSonarrNotifications();
+        setNotifications(data);
+        toast.success("Notifiche aggiornate da Sonarr");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Errore aggiornamento notifiche");
       }
     });
   };
@@ -777,6 +803,73 @@ export default function ImpostazioniPage() {
                           <Pencil className="h-4 w-4" />
                         </Button>
                       )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Sonarr Notifications */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Bell className="h-5 w-5" />
+                  Notifiche Sonarr
+                </CardTitle>
+                <CardDescription>
+                  Visualizza le notifiche configurate in Sonarr che verranno utilizzate per gli eventi di download
+                </CardDescription>
+              </div>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={handleSyncNotifications}
+                disabled={isSyncingNotifications}
+                title="Aggiorna notifiche da Sonarr"
+              >
+                {isSyncingNotifications ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {notifications.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Bell className="h-12 w-12 mx-auto mb-2 opacity-20" />
+                <p>Nessuna notifica configurata in Sonarr</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {notifications.map((notification) => (
+                  <div
+                    key={notification.id}
+                    className="flex items-center justify-between py-3 border-b last:border-b-0"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium">{notification.name}</p>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-secondary text-secondary-foreground">
+                          {notification.implementation}
+                        </span>
+                      </div>
+                      <div className="flex gap-2 mt-1">
+                        {notification.onDownload ? (
+                          <span className="text-xs text-green-600 flex items-center gap-1">
+                            <Check className="h-3 w-3" /> On Download
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground flex items-center gap-1">
+                            <X className="h-3 w-3" /> On Download
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}

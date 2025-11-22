@@ -93,6 +93,7 @@ router.group(() => {
   // Sonarr routes
   router.group(() => {
     router.get('/tags', [SonarrController, 'getTags'])
+    router.get('/notifications', [SonarrController, 'getNotifications'])
   }).prefix('/sonarr')
 
 }).prefix('/api')

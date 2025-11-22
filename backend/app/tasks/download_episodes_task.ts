@@ -10,6 +10,7 @@ import { createWriteStream } from 'fs'
 import fs from 'fs/promises'
 import path from 'path'
 import string from '@adonisjs/core/helpers/string'
+import { NotificationService } from '#services/notification_service'
 
 export interface DownloadEpisodeParams {
   episodeId: number
@@ -127,6 +128,14 @@ export class DownloadEpisodesTask {
       await this.copyToSonarrAndRescan(params, outputPath)
 
       await this.renameEpisodeFile(params)  
+
+      // Send notification
+      await NotificationService.sendDownloadNotification(
+        params.seriesTitle,
+        params.seasonNumber,
+        params.episodeNumber,
+        params.episodeTitle
+      )
       
       // Mark as completed
       queue.completeItem(queueItemId)
