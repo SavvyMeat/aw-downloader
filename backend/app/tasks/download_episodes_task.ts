@@ -9,6 +9,7 @@ import axios from 'axios'
 import { createWriteStream } from 'fs'
 import fs from 'fs/promises'
 import path from 'path'
+import string from '@adonisjs/core/helpers/string'
 
 export interface DownloadEpisodeParams {
   episodeId: number
@@ -112,9 +113,9 @@ export class DownloadEpisodesTask {
       
       // Merge chunks
       console.log(`Merging chunks...`)
-      const outputPath = app.makePath(
-        'storage/downloads',
-        `${params.seriesTitle}_S${params.seasonNumber}E${params.episodeNumber}.${fileExtension}`
+      const outputPath = app.tmpPath(
+        'downloads',
+        `${string.random(16)}.${fileExtension.replace(/^\.*/, '')}`
       )
       await fs.mkdir(path.dirname(outputPath), { recursive: true })
       await this.mergeChunks(chunks, outputPath)
