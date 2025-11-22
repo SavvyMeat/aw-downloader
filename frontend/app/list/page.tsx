@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Search, Loader2, ChevronLeft, ChevronRight, Film, Trash2, Eye } from "lucide-react";
+import { Search, Loader2, ChevronLeft, ChevronRight, Film, Trash2, Eye, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,12 +39,14 @@ export default function ListaPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [seriesIdToDelete, setSeriesIdToDelete] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [sortBy, setSortBy] = useState<string>("title");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const limit = 10;
 
   const fetchSeriesList = async () => {
     setLoading(true);
     try {
-      const data = await fetchSeries({ page, limit, search });
+      const data = await fetchSeries({ page, limit, search, sortBy, sortOrder });
       setSeries(data.data);
       setMeta(data.meta);
       setError(null);
@@ -58,7 +60,7 @@ export default function ListaPage() {
   useEffect(() => {
     fetchSeriesList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, search]);
+  }, [page, search, sortBy, sortOrder]);
 
   // Create debounced search function
   const debouncedSearch = useRef(
@@ -96,6 +98,29 @@ export default function ListaPage() {
     e.stopPropagation();
     setSeriesIdToDelete(seriesId);
     setDeleteDialogOpen(true);
+  };
+
+  const handleSort = (column: string) => {
+    if (sortBy === column) {
+      // Toggle sort order
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    } else {
+      // New column, default to ascending
+      setSortBy(column);
+      setSortOrder("asc");
+    }
+    setPage(1); // Reset to first page when sorting changes
+  };
+
+  const getSortIcon = (column: string) => {
+    if (sortBy !== column) {
+      return <ArrowUpDown className="h-3 w-3 sm:h-4 sm:w-4 ml-1 opacity-30" />;
+    }
+    return sortOrder === "asc" ? (
+      <ArrowUp className="h-3 w-3 sm:h-4 sm:w-4 ml-1" />
+    ) : (
+      <ArrowDown className="h-3 w-3 sm:h-4 sm:w-4 ml-1" />
+    );
   };
 
   const handleDeleteConfirm = async () => {
@@ -186,11 +211,39 @@ export default function ListaPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="min-w-[200px] sm:w-[50%]">Titolo</TableHead>
-              <TableHead className="hidden sm:table-cell">Stato</TableHead>
-              <TableHead className="text-center min-w-[80px]">Stagioni</TableHead>
-              <TableHead className="text-center min-w-[100px]">Ep. Mancanti</TableHead>
-              <TableHead className="text-right min-w-[80px]">Azioni</TableHead>
+              <TableHead className="min-w-[200px] sm:w-[50%]">
+                <button
+                  onClick={() => handleSort("title")}
+                  className="flex items-center hover:text-foreground transition-colors text-xs sm:text-sm font-medium"
+                >
+                  Titolo
+                  {getSortIcon("title")}
+                </button>
+              </TableHead>
+              <TableHead className="hidden sm:table-cell">
+                <button
+                  onClick={() => handleSort("status")}
+                  className="flex items-center hover:text-foreground transition-colors text-xs sm:text-sm font-medium"
+                >
+                  Stato
+                  {getSortIcon("status")}
+                </button>
+              </TableHead>
+              <TableHead className="text-center min-w-[80px]">
+                <span className="text-xs sm:text-sm">Stagioni</span>
+              </TableHead>
+              <TableHead className="text-center min-w-[100px]">
+                <button
+                  onClick={() => handleSort("missingEpisodes")}
+                  className="flex items-center justify-center hover:text-foreground transition-colors text-xs sm:text-sm font-medium mx-auto"
+                >
+                  Ep. Mancanti
+                  {getSortIcon("missingEpisodes")}
+                </button>
+              </TableHead>
+              <TableHead className="text-right min-w-[80px]">
+                <span className="text-xs sm:text-sm">Azioni</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

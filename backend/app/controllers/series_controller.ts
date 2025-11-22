@@ -14,6 +14,8 @@ export default class SeriesController {
       const page = request.input('page', 1)
       const limit = request.input('limit', 10)
       const search = request.input('search', '')
+      const sortBy = request.input('sortBy', 'title') // title, status, missingEpisodes
+      const sortOrder = request.input('sortOrder', 'asc') // asc, desc
 
       const query = Series.query().preload('seasons')
 
@@ -24,6 +26,18 @@ export default class SeriesController {
             .orWhere('description', 'like', `%${search}%`)
             .orWhere('alternate_titles', 'like', `%${search}%`)
         })
+      }
+
+      // Apply sorting based on sortBy parameter
+      if (sortBy === 'title') {
+        query.orderBy('title', sortOrder)
+      } else if (sortBy === 'status') {
+        query.orderBy('status', sortOrder)
+      } else if (sortBy === 'missingEpisodes') {
+        // For missing episodes, we need a subquery to count
+        query.orderByRaw(
+          `(SELECT COALESCE(SUM(missing_episodes), 0) FROM seasons WHERE series_id = series.id AND deleted = false) ${sortOrder.toUpperCase()}`
+        )
       }
 
       const series = await query.paginate(page, limit)
@@ -41,9 +55,7 @@ export default class SeriesController {
           const totalSeasons = seasons.length
 
           // Check if any non-deleted season is missing download URL
-          const seasonsWithoutUrl = seasons.filter(season => {
-            return s.absolute ? season.seasonNumber === 1 : true
-          }).filter((season) => {
+          const seasonsWithoutUrl = seasons.filter((season) => {
             return !season.downloadUrls || season.downloadUrls.length === 0
           })
 

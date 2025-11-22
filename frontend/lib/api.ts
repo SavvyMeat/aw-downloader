@@ -43,6 +43,8 @@ export interface FetchSeriesParams {
   page?: number;
   limit?: number;
   search?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
 }
 
 export async function fetchSeriesRouterPaths(): Promise<number[]> {
@@ -54,13 +56,18 @@ export async function fetchSeriesRouterPaths(): Promise<number[]> {
 }
 
 export async function fetchSeries(params: FetchSeriesParams = {}): Promise<SeriesListResponse> {
-  const { page = 1, limit = 10, search = "" } = params;
+  const { page = 1, limit = 10, search = "", sortBy = "title", sortOrder = "asc" } = params;
   
   const queryParams = new URLSearchParams({
     page: page.toString(),
     limit: limit.toString(),
-    ...(search && { search }),
+    sortBy: sortBy,
+    sortOrder: sortOrder,
   });
+
+  if (search) {
+    queryParams.append('search', search);
+  }
 
   const response = await fetch(`${API_BASE_URL}/api/series?${queryParams}`);
   if (!response.ok) throw new Error("Failed to fetch series");
