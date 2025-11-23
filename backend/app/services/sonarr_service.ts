@@ -78,11 +78,35 @@ export interface SonarrTag {
   label: string
 }
 
+export interface SonarrNotificationSelectOption {
+  value: number | string
+  name: string
+  order?: number
+  hint?: string
+}
+
+export interface SonarrNotificationField {
+  order?: number
+  name: string
+  label: string
+  value: any
+  type: string
+  advanced?: boolean
+  helpText?: string
+  helpLink?: string
+  selectOptions?: SonarrNotificationSelectOption[]
+  privacy?: 'normal' | 'password' | 'apiKey' | 'userName'
+  isFloat?: boolean
+  placeholder?: string
+}
+
 export interface SonarrNotificationConfig {
   id: number
   name: string
+  implementationName?: string
   implementation: string
   configContract: string
+  infoLink?: string
   onGrab: boolean
   onDownload: boolean
   onUpgrade: boolean
@@ -92,6 +116,7 @@ export interface SonarrNotificationConfig {
   onEpisodeFileDeleteForUpgrade: boolean
   onHealthIssue: boolean
   onApplicationUpdate: boolean
+  onManualInteractionRequired?: boolean
   supportsOnGrab: boolean
   supportsOnDownload: boolean
   supportsOnUpgrade: boolean
@@ -101,9 +126,10 @@ export interface SonarrNotificationConfig {
   supportsOnEpisodeFileDeleteForUpgrade: boolean
   supportsOnHealthIssue: boolean
   supportsOnApplicationUpdate: boolean
+  supportsOnManualInteractionRequired?: boolean
   includeHealthWarnings: boolean
   tags: number[]
-  fields: any[]
+  fields: SonarrNotificationField[]
 }
 
 interface SeriesCache {

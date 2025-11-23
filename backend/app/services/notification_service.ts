@@ -66,29 +66,14 @@ export class NotificationService {
 
     try {
       switch (implementation) {
-        case 'Telegram':
-          await this.sendTelegram(notification, message)
-          break
         case 'Discord':
           await this.sendDiscord(notification, title, message)
-          break
-        case 'Gotify':
-          await this.sendGotify(notification, title, message)
-          break
-        case 'Slack':
-          await this.sendSlack(notification, title, message)
           break
         case 'Webhook':
           await this.sendWebhook(notification, title, message)
           break
         case 'Apprise':
           await this.sendApprise(notification, title, message)
-          break
-        case 'Ntfy':
-          await this.sendNtfy(notification, title, message)
-          break
-        case 'Pushover':
-          await this.sendPushover(notification, title, message)
           break
         default:
           logger.warning(
@@ -114,25 +99,15 @@ export class NotificationService {
    */
   private static getField<T>(notification: SonarrNotificationConfig, name: string): T | undefined {
     const field = notification.fields.find((f) => f.name === name)
-    return field ? (field.value as T) : undefined
-  }
 
-  /**
-   * Sends a notification via Telegram.
-   * Requires 'botToken' and 'chatId' fields.
-   */
-  private static async sendTelegram(notification: SonarrNotificationConfig, message: string): Promise<void> {
-    const botToken = this.getField<string>(notification, 'botToken')
-    const chatId = this.getField<string>(notification, 'chatId')
+    if (!field) return undefined
 
-    if (!botToken || !chatId) {
-      throw new Error('Missing botToken or chatId for Telegram')
+    switch (field.type) {
+      case 'select':
+        return field.selectOptions?.find((opt) => opt.value === field.value)?.name as T
+      default:
+        return field.value as T
     }
-
-    await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-      chat_id: chatId,
-      text: message,
-    })
   }
 
   /**
@@ -156,48 +131,8 @@ export class NotificationService {
   }
 
   /**
-   * Sends a notification via Gotify.
-   * Requires 'server' and 'appToken' fields.
-   */
-  private static async sendGotify(
-    notification: SonarrNotificationConfig,
-    title: string,
-    message: string
-  ): Promise<void> {
-    const url = this.getField<string>(notification, 'server')
-    const appToken = this.getField<string>(notification, 'appToken')
-
-    if (!url || !appToken) {
-      throw new Error('Missing server or appToken for Gotify')
-    }
-
-    const cleanUrl = url.replace(/\/$/, '')
-    await axios.post(`${cleanUrl}/message?token=${appToken}`, {
-      title: title,
-      message: message,
-      priority: 5,
-    })
-  }
-
-  /**
-   * Sends a notification via Slack Webhook.
-   * Requires 'webHookUrl' field.
-   */
-  private static async sendSlack(notification: SonarrNotificationConfig, title: string, message: string): Promise<void> {
-    const url = this.getField<string>(notification, 'webHookUrl')
-
-    if (!url) {
-      throw new Error('Missing webHookUrl for Slack')
-    }
-
-    await axios.post(url, {
-      text: `*${title}*\n${message}`,
-    })
-  }
-
-  /**
    * Sends a generic Webhook notification.
-   * Requires 'url' field. Optional 'method' (default POST).
+   * Requires 'url' field.
    */
   private static async sendWebhook(
     notification: SonarrNotificationConfig,
@@ -205,10 +140,14 @@ export class NotificationService {
     message: string
   ): Promise<void> {
     const url = this.getField<string>(notification, 'url')
-    const method = this.getField<string>(notification, 'method') || 'POST'
+    const method = this.getField<string>(notification, 'method')
 
     if (!url) {
       throw new Error('Missing url for Webhook')
+    }
+
+    if (!method) {
+      throw new Error('Missing method for Webhook')
     }
 
     await axios({
@@ -260,68 +199,5 @@ export class NotificationService {
     }
 
     await axios.post(endpoint, payload)
-  }
-
-  /**
-   * Sends a notification via Ntfy.
-   * Requires 'topics'. Optional 'serverUrl' (default ntfy.sh), 'priority', 'tags'.
-   */
-  private static async sendNtfy(
-    notification: SonarrNotificationConfig,
-    title: string,
-    message: string
-  ): Promise<void> {
-    const serverUrl = this.getField<string>(notification, 'serverUrl') || 'https://ntfy.sh'
-    const topics = this.getField<string | string[]>(notification, 'topics')
-    const priority = this.getField<number>(notification, 'priority') || 3
-    const tags = this.getField<string[]>(notification, 'tags')
-
-    if (!topics) {
-      throw new Error('Missing topics for Ntfy')
-    }
-
-    // Handle topics as array or comma-separated string
-    const topicList = Array.isArray(topics) ? topics : String(topics).split(',')
-    
-    for (const topic of topicList) {
-        if (!topic) continue
-        
-        const cleanUrl = serverUrl.replace(/\/$/, '')
-        await axios.post(`${cleanUrl}/${topic.trim()}`, {
-            topic: topic.trim(),
-            title: title,
-            message: message,
-            priority: priority,
-            tags: Array.isArray(tags) ? tags : [],
-        })
-    }
-  }
-
-  /**
-   * Sends a notification via Pushover.
-   * Requires 'apiKey' and 'userKey'. Optional 'priority', 'sound'.
-   */
-  private static async sendPushover(
-    notification: SonarrNotificationConfig,
-    title: string,
-    message: string
-  ): Promise<void> {
-    const apiKey = this.getField<string>(notification, 'apiKey')
-    const userKey = this.getField<string>(notification, 'userKey')
-    const priority = this.getField<number>(notification, 'priority') || 0
-    const sound = this.getField<string>(notification, 'sound')
-
-    if (!apiKey || !userKey) {
-      throw new Error('Missing apiKey or userKey for Pushover')
-    }
-
-    await axios.post('https://api.pushover.net/1/messages.json', {
-      token: apiKey,
-      user: userKey,
-      title: title,
-      message: message,
-      priority: priority,
-      sound: sound,
-    })
   }
 }
