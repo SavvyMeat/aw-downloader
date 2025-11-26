@@ -400,7 +400,7 @@ export class DownloadEpisodesTask {
         const episode = await sonarrService.getEpisode(episodeId)
         
         if (episode.episodeFileId) {
-          await sonarrService.renameEpisodeFile(episode.episodeFileId)
+          await sonarrService.renameEpisodeFile(episode)
           logger.success('DownloadTask', `Successfully renamed ${seriesTitle} S${seasonNumber}E${episodeNumber}`)
         } else {
           logger.warning('DownloadTask', `Episode file ID not found for ${seriesTitle} S${seasonNumber}E${episodeNumber}, skipping rename`)

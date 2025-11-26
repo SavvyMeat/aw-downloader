@@ -503,18 +503,21 @@ export class SonarrService {
    * This tells Sonarr to rename the episode file according to the naming scheme
    * @param fileId - The episode file ID from Sonarr
    */
-  async renameEpisodeFile(fileId: number): Promise<void> {
+  async renameEpisodeFile(episode: SonarrEpisode): Promise<void> {
     this.ensureInitialized()
     this.ensureHealthy()
 
     try {
-      logger.debug('SonarrService', `Triggering rename for file ${fileId}`)
+      if ( !episode.episodeFileId ) {
+        throw new Error(`${episode.title} S${episode.seasonNumber}E${episode.episodeNumber} does not have a valid file ID`)
+      }
 
       await axios.post(
         `${this.sonarrUrl}/api/v3/command`,
         {
           name: 'RenameFiles',
-          files: [fileId],
+          seriesId: episode.seriesId,
+          files: [episode.episodeFileId],
         },
         {
           headers: {
@@ -523,9 +526,8 @@ export class SonarrService {
         }
       )
 
-      logger.success('SonarrService', `Successfully triggered rename for file ${fileId}`)
+      logger.debug('SonarrService', `Triggered rename for file ${episode.title} S${episode.seasonNumber}E${episode.episodeNumber}`)
     } catch (error) {
-      logger.error('SonarrService', `Failed to trigger rename for file ${fileId}`, error)
       throw new Error(
         `Failed to rename file: ${error instanceof Error ? error.message : 'Unknown error'}`
       )
