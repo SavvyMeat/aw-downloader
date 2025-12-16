@@ -66,6 +66,7 @@ router.group(() => {
     router.get('/config', [DownloadQueueController, 'config'])
     router.post('/', [DownloadQueueController, 'store'])
     router.delete('/completed', [DownloadQueueController, 'clearCompleted'])
+    router.delete('/stop-all', [DownloadQueueController, 'stopAll'])
     router.delete('/:id', [DownloadQueueController, 'destroy'])
   }).prefix('/download-queue')
 

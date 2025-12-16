@@ -99,4 +99,26 @@ export default class DownloadQueueController {
       message: 'Completed items cleared',
     })
   }
+
+  /**
+   * Stop all pending and active downloads
+   */
+  async stopAll({ response }: HttpContext) {
+    const queue = getDownloadQueue()
+    const items = queue.getAllItems()
+    
+    // Stop all pending and downloading items
+    const itemsToStop = items.filter(
+      (item) => item.status === 'pending' || item.status === 'downloading'
+    )
+
+    for (const item of itemsToStop) {
+      await queue.cancelDownload(item.id)
+    }
+
+    return response.json({
+      message: `Stopped ${itemsToStop.length} downloads`,
+      count: itemsToStop.length,
+    })
+  }
 }

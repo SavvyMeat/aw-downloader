@@ -27,6 +27,7 @@ import {
   fetchDownloadQueue,
   removeFromQueue,
   clearCompletedQueue,
+  stopAllDownloads,
   type QueueItem,
   type QueueConfig,
 } from "@/lib/api";
@@ -37,6 +38,7 @@ export default function DownloadQueueCard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [itemToCancel, setItemToCancel] = useState<QueueItem | null>(null);
+  const [showStopAllDialog, setShowStopAllDialog] = useState(false);
 
   useEffect(() => {
     fetchQueue();
@@ -94,6 +96,16 @@ export default function DownloadQueueCard() {
     try {
       await clearCompletedQueue();
       await fetchQueue();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    }
+  };
+
+  const handleStopAll = async () => {
+    try {
+      const result = await stopAllDownloads();
+      await fetchQueue();
+      setShowStopAllDialog(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     }
@@ -174,17 +186,30 @@ export default function DownloadQueueCard() {
               )}
             </CardDescription>
           </div>
-          {(completedItems.length > 0 || failedItems.length > 0) && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleClearCompleted}
-              className="w-full sm:w-auto"
-            >
-              <Trash2 className="h-4 w-4 mr-2" />
-              Pulisci
-            </Button>
-          )}
+          <div className="flex gap-2">
+            {(activeItems.length > 0 || pendingItems.length > 0) && (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setShowStopAllDialog(true)}
+                className="w-full sm:w-auto"
+              >
+                <StopCircle className="h-4 w-4 mr-2" />
+                Ferma Tutti
+              </Button>
+            )}
+            {(completedItems.length > 0 || failedItems.length > 0) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearCompleted}
+                className="w-full sm:w-auto"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Pulisci
+              </Button>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-3 sm:space-y-4">
@@ -289,6 +314,26 @@ export default function DownloadQueueCard() {
             <AlertDialogCancel>Annulla</AlertDialogCancel>
             <AlertDialogAction onClick={confirmCancelDownload} className="bg-red-600 hover:bg-red-700">
               Interrompi Download
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Stop All Confirmation Dialog */}
+      <AlertDialog open={showStopAllDialog} onOpenChange={setShowStopAllDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Fermare tutti i download?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Verranno rimossi <strong>{activeItems.length + pendingItems.length}</strong> download dalla coda.
+              <br />
+              Vuoi procedere?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annulla</AlertDialogCancel>
+            <AlertDialogAction onClick={handleStopAll} className="bg-red-600 hover:bg-red-700">
+              Ferma Tutti
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

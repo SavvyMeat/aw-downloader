@@ -399,6 +399,19 @@ export async function clearCompletedQueue(): Promise<{ message: string }> {
   return response.json();
 }
 
+export async function stopAllDownloads(): Promise<{ message: string; count: number }> {
+  const response = await fetch(`${API_BASE_URL}/api/download-queue/stop-all`, {
+    method: "DELETE",
+  });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Failed to stop all downloads");
+  }
+  
+  return response.json();
+}
+
 // ============================================
 // LOGS API
 // ============================================

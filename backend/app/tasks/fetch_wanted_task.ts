@@ -38,7 +38,7 @@ export class FetchWantedTask extends BaseTask {
     const response = await this.sonarrService.getWantedMissingEpisodes(
       100,
       'airDateUtc',
-      'descending'
+      'ascending'
     )
 
     // Filter out episodes without valid seriesId
