@@ -441,7 +441,7 @@ export class SonarrService {
 
       return isHealthy
     } catch (error) {
-      logger.error('SonarrService', 'Health check failed', error)
+      logger.error('SonarrService', 'Health check failed', error.message)
       SonarrService.healthy = false
       SonarrService.lastCheck = new Date()
       return false

@@ -5,6 +5,7 @@ import { getDownloadQueue } from '#services/download_queue'
 import { AnimeworldService } from '#services/animeworld_service'
 import { logger } from '#services/logger_service'
 import { getSonarrService, type SonarrWantedRecord } from '#services/sonarr_service'
+import { MetadataSyncService } from '#services/metadata_sync_service'
 import Series from '#models/series'
 
 export class FetchWantedTask extends BaseTask {
@@ -81,8 +82,31 @@ export class FetchWantedTask extends BaseTask {
 
     logger.info('FetchWanted', `Found ${this.wantedEpisodes.length} wanted/missing episodes`)
 
+    // Ensure all series exist in local database
+    await this.syncWantedSeriesMetadata()
+
     // Add missing episodes to download queue
     await this.addToDownloadQueue()
+  }
+
+  private async syncWantedSeriesMetadata(): Promise<void> {
+    // Check if series exist in database and sync if needed
+    const uniqueSeriesIds = [...new Set(this.wantedEpisodes.map(ep => ep.seriesId))]
+    
+    // Find which series are missing from database in a single query
+    const existingSeries = await Series.query()
+      .whereIn('sonarrId', uniqueSeriesIds)
+      .select('id')
+      .pojo()
+    const existingIds = existingSeries.map((s) => (s as { id: number }).id);
+    const missingSeriesIds = uniqueSeriesIds.filter(id => !existingIds.includes(id))
+
+    const metadataSyncService = new MetadataSyncService()
+
+    // Sync only missing series
+    for (const sonarrId of missingSeriesIds) {
+      await metadataSyncService.syncSeries(sonarrId)
+    }
   }
 
   /**
