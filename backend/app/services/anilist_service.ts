@@ -24,6 +24,9 @@ export interface AniListMedia {
   title: AniListTitle
   episodes: number | null
   seasonYear: number | null
+  status: 'FINISHED' | 'RELEASING' | 'NOT_YET_RELEASED' | 'CANCELLED' | 'HIATUS'
+  airing: boolean
+  aired: boolean
   season: 'WINTER' | 'SPRING' | 'SUMMER' | 'FALL'
   format:
     | 'TV'
@@ -82,7 +85,7 @@ export class AniListService {
       const waitTime = this.rateLimitReset - now
 
       if (waitTime > 0) {
-        logger.warning('AniList', `Rate limit reached, waiting ${waitTime}s`)
+        logger.warning('AniList', `Limite di richieste raggiunto, attesa di ${waitTime}s`)
         await new Promise((resolve) => setTimeout(resolve, waitTime * 1000))
       }
     }
@@ -122,7 +125,7 @@ export class AniListService {
         const retryAfter = error.response.headers['retry-after']
         const waitTime = retryAfter ? parseInt(retryAfter as string, 10) : 60
 
-        logger.warning('AniList', `Rate limit exceeded (429), retrying after ${waitTime}s`)
+        logger.warning('AniList', `Troppe richieste, attesa di ${waitTime}s prima di riprovare`)
 
         // Wait and retry once
         await new Promise((resolve) => setTimeout(resolve, waitTime * 1000))
@@ -174,8 +177,6 @@ export class AniListService {
         year: year || null
       }
 
-      logger.debug('AniList', `Searching for anime: "${search}"`)
-
       const data = await this.makeGraphQLRequest<AniListSearchResponse>(query, variables)
 
       await Utility.wait(200) // Small delay to avoid hitting rate limits
@@ -212,12 +213,12 @@ export class AniListService {
         return result
       }
 
-      logger.warning('AniList', `No anime found for: "${search}"`)
+      logger.warning('AniList', `Anime non trovato: "${search}"`)
       return null
     } catch (error: any) {
       // Handle 404 - anime not found
       if (error.response?.statusCode === 404) {
-        logger.warning('AniList', `Anime not found (404): "${search}"`)
+        logger.warning('AniList', `Anime non trovato (404): "${search}"`)
         return null
       }
 
@@ -225,14 +226,14 @@ export class AniListService {
       if (error.response?.statusCode && error.response.statusCode !== 429) {
         logger.error(
           'AniList',
-          `HTTP error ${error.response.statusCode} searching anime "${search}"`,
+          `Errore HTTP ${error.response.statusCode} durante la ricerca di "${search}"`,
           error
         )
         return null
       }
 
       // Handle network or other errors
-      logger.error('AniList', `Error searching anime "${search}"`, error)
+      logger.error('AniList', `Errore durante la ricerca di "${search}"`, error)
       throw new Error(
         `Failed to search anime on AniList: ${error instanceof Error ? error.message : 'Unknown error'}`
       )
@@ -269,6 +270,7 @@ export class AniListService {
             seasonYear
             season
             format
+            status
           }
         }
       `
@@ -276,8 +278,6 @@ export class AniListService {
       const variables = {
         id
       }
-
-      logger.debug('AniList', `Searching for anime by ID: ${id}`)
 
       const data = await this.makeGraphQLRequest<AniListSearchResponse>(query, variables)
 
@@ -310,17 +310,19 @@ export class AniListService {
           ...media,
           startDateUtc,
           endDateUtc,
+          airing: media.status === 'RELEASING',
+          aired: media.status === 'CANCELLED' || media.status === 'FINISHED'
         }
 
         return result
       }
 
-      logger.warning('AniList', `No anime found for ID: ${id}`)
+      logger.warning('AniList', `Anime non trovato con ID: ${id}`)
       return null
     } catch (error: any) {
       // Handle 404 - anime not found
       if (error.response?.statusCode === 404) {
-        logger.warning('AniList', `Anime not found (404) for ID: ${id}`)
+        logger.warning('AniList', `Anime non trovato (404) con ID: ${id}`)
         return null
       }
 
@@ -328,14 +330,14 @@ export class AniListService {
       if (error.response?.statusCode && error.response.statusCode !== 429) {
         logger.error(
           'AniList',
-          `HTTP error ${error.response.statusCode} searching anime by ID ${id}`,
+          `Errore HTTP ${error.response.statusCode} durante la ricerca dell'anime con ID ${id}`,
           error
         )
         return null
       }
 
       // Handle network or other errors
-      logger.error('AniList', `Error searching anime by ID ${id}`, error)
+      logger.error('AniList', `Errore durante la ricerca dell'anime con ID ${id}`, error)
       throw new Error(
         `Failed to search anime by ID on AniList: ${error instanceof Error ? error.message : 'Unknown error'}`
       )
@@ -372,6 +374,7 @@ export class AniListService {
               seasonYear
               season
               format
+              status
             }
             pageInfo {
               total

@@ -142,10 +142,9 @@ export class SonarrService {
         },
       })
 
-      logger.debug('SonarrService', `Fetched ${response.data.length} series from Sonarr`)
       return response.data
     } catch (error) {
-      logger.error('SonarrService', 'Error fetching series from Sonarr', error)
+      logger.error('SonarrService', 'Errore durante il recupero delle serie da Sonarr', error)
       throw error
     }
   }
@@ -175,17 +174,12 @@ export class SonarrService {
         }
       )
 
-      logger.debug(
-        'SonarrService',
-        `Fetched ${response.data.length} episodes for series ${seriesId}`
-      )
-
       // Cache the result for 5 minutes
       await cache.set({ key: cacheKey, value: response.data, ttl: '5m' })
 
       return response.data
     } catch (error) {
-      logger.error('SonarrService', `Error fetching episodes for series ${seriesId}`, error)
+      logger.error('SonarrService', `Errore durante il recupero degli episodi`, error)
       throw error
     }
   }
@@ -200,7 +194,6 @@ export class SonarrService {
     this.ensureHealthy()
 
     try {
-      logger.debug('SonarrService', `Fetching series ${seriesId} from Sonarr`)
       const response = await axios.get<SonarrSeries>(
         `${this.sonarrUrl}/api/v3/series/${seriesId}`,
         {
@@ -210,10 +203,9 @@ export class SonarrService {
         }
       )
 
-      logger.debug('SonarrService', `Cached series ${seriesId} data`)
       return response.data
     } catch (error) {
-      logger.error('SonarrService', `Error fetching series ${seriesId}`, error)
+      logger.error('SonarrService', `Errore durante il recupero della serie`, error)
       throw error
     }
   }
@@ -241,7 +233,7 @@ export class SonarrService {
       )
       return response.data
     } catch (error) {
-      logger.error('SonarrService', `Error fetching episode ${episodeId}`, error.message)
+      logger.error('SonarrService', `Errore durante il recupero dell'episodio`, error)
       throw error
     }
   }
@@ -253,10 +245,8 @@ export class SonarrService {
   static clearSeriesCache(seriesId?: number): void {
     if (seriesId !== undefined) {
       SonarrService.seriesCache.delete(seriesId)
-      logger.debug('SonarrService', `Cleared cache for series ${seriesId}`)
     } else {
       SonarrService.seriesCache.clear()
-      logger.debug('SonarrService', 'Cleared all series cache')
     }
   }
 
@@ -291,7 +281,7 @@ export class SonarrService {
 
       return response.data
     } catch (error) {
-      logger.error('SonarrService', 'Error fetching wanted/missing episodes', error)
+      logger.error('SonarrService', 'Errore durante il recupero degli episodi mancanti', error)
       throw error
     }
   }
@@ -357,7 +347,7 @@ export class SonarrService {
     } catch (error) {
       logger.error(
         'SonarrService',
-        `Error checking episodes for series ${seriesId}, season ${seasonNumber}`,
+        `Errore durante il controllo degli episodi`,
         error
       )
       return { hasValidAirDate: false, startDate: null, endDate: null }
@@ -375,10 +365,6 @@ export class SonarrService {
       (show) => show.seriesType.toLowerCase() === 'anime' && show.monitored
     )
 
-    logger.debug(
-      'SonarrService',
-      `Found ${animeSeries.length} monitored anime series out of ${allSeries.length} total`
-    )
     return animeSeries
   }
 
@@ -396,10 +382,9 @@ export class SonarrService {
         },
       })
 
-      logger.debug('SonarrService', `Fetched ${response.data.length} root folders from Sonarr`)
       return response.data
     } catch (error) {
-      logger.error('SonarrService', 'Error fetching root folders from Sonarr', error)
+      logger.error('SonarrService', 'Errore durante il recupero delle cartelle root', error)
       throw error
     }
   }
@@ -420,7 +405,7 @@ export class SonarrService {
 
       return response.data
     } catch (error) {
-      logger.error('SonarrService', 'Error fetching tags from Sonarr', error.message)
+      logger.error('SonarrService', 'Errore durante il recupero dei tag', error)
       throw error
     }
   }
@@ -440,7 +425,7 @@ export class SonarrService {
       })
       return true
     } catch (error) {
-      logger.error('SonarrService', 'Connection test failed', error)
+      logger.error('SonarrService', 'Test di connessione fallito', error)
       return false
     }
   }
@@ -468,7 +453,7 @@ export class SonarrService {
 
       return isHealthy
     } catch (error) {
-      logger.error('SonarrService', 'Health check failed', error.message)
+      logger.error('SonarrService', 'Healthcheck fallito', error)
       SonarrService.healthy = false
       SonarrService.lastCheck = new Date()
       return false
@@ -518,8 +503,8 @@ export class SonarrService {
     } catch (error) {
       logger.error(
         'SonarrService',
-        `Failed to trigger rescan for series ${seriesId}`,
-        error.message
+        `Impossibile avviare la scansione`,
+        error
       )
       throw new Error(
         `Failed to rescan series: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -555,11 +540,6 @@ export class SonarrService {
             'X-Api-Key': this.sonarrToken!,
           },
         }
-      )
-
-      logger.debug(
-        'SonarrService',
-        `Triggered rename for file ${episode.title} S${episode.seasonNumber}E${episode.episodeNumber}`
       )
     } catch (error) {
       throw new Error(

@@ -2,57 +2,6 @@ import { logger } from '#services/logger_service'
 import got from 'got'
 import pThrottle from 'p-throttle'
 
-export interface AniListDate {
-  year: number | null
-  month: number | null
-  day: number | null
-}
-
-export interface AniListTitle {
-  romaji: string | null
-  english: string | null
-}
-
-export interface AniListMedia {
-  id: number
-  startDate: AniListDate
-  endDate: AniListDate
-  startDateUtc: string | null // ISO 8601 UTC date string for easy comparisons
-  endDateUtc: string | null // ISO 8601 UTC date string for easy comparisons
-  title: AniListTitle
-  episodes: number | null
-  seasonYear: number | null
-  season: 'WINTER' | 'SPRING' | 'SUMMER' | 'FALL'
-  format:
-    | 'TV'
-    | 'TV_SHORT'
-    | 'MOVIE'
-    | 'SPECIAL'
-    | 'OVA'
-    | 'ONA'
-    | 'MUSIC'
-    | 'MANGA'
-    | 'NOVEL'
-    | 'ONE_SHOT'
-}
-
-export interface AniListSearchResponse {
-  data: {
-    Media: AniListMedia
-  }
-}
-
-export interface AniListSeasonPartsResponse {
-  data: {
-    Page: {
-      media: AniListMedia[]
-      pageInfo: {
-        total: number
-      }
-    }
-  }
-}
-
 export interface MyAnimeListAnimeResponse {
   mal_id: number
   aired: {
@@ -62,6 +11,7 @@ export interface MyAnimeListAnimeResponse {
   episodes: number | null
   type: 'TV' | 'OVA' | 'Movie' | 'Special' | 'ONA' | 'Music'
   airing: boolean
+  status: 'Finished Airing' | 'Currently Airing' | 'Not yet aired'
   season: 'summer' | 'winter' | 'spring' | 'fall'
   titles: Array<{
     type: 'Default' | 'Synonym' | 'Japanese' | 'English'
@@ -71,11 +21,12 @@ export interface MyAnimeListAnimeResponse {
 
 export type MyAnimeListAnime = Pick<
   MyAnimeListAnimeResponse,
-  'episodes' | 'titles' | 'type' | 'season'
+  'episodes' | 'titles' | 'type' | 'season' | 'airing'
 > &
   Partial<{
     id: number
     title: string
+    aired: boolean
     startDateUtc?: string | null
     endDateUtc?: string | null
   }>
@@ -166,8 +117,6 @@ export class MyAnimeListService {
    */
   async getMediaById(id: number): Promise<MyAnimeListAnime | null> {
     try {
-      logger.debug('MyAnimeList', `Fetching anime by ID: ${id}`)
-
       const response = await this._fetchData<SuccesssResponse<MyAnimeListAnimeResponse>>(
         `anime/${id}`
       )
@@ -181,6 +130,8 @@ export class MyAnimeListService {
         episodes: response.data.episodes,
         type: response.data.type,
         season: response.data.season,
+        airing: response.data.airing,
+        aired: response.data.status === 'Finished Airing',
         title: response.data.titles?.find((title) => title.type === 'Default')?.title || '',
         titles: response.data.titles.map((title) => ({
           type: title.type,
@@ -188,12 +139,11 @@ export class MyAnimeListService {
         })),
       }
 
-      logger.success('MyAnimeList', `Found anime: ${malAnime.titles[0]?.title || 'Unknown'}`)
       return malAnime
     } catch (error: any) {
       // Handle 404 - anime not found
       if (error.response?.statusCode === 404) {
-        logger.warning('MyAnimeList', `Anime not found (404) for ID: ${id}`)
+        logger.warning('MyAnimeList', `Anime non trovato (404) con ID: ${id}`)
         return null
       }
 
@@ -201,14 +151,14 @@ export class MyAnimeListService {
       if (error.response?.statusCode && error.response.statusCode !== 429) {
         logger.error(
           'MyAnimeList',
-          `HTTP error ${error.response.statusCode} fetching anime with MAL ID ${id}`,
+          `Errore HTTP ${error.response.statusCode} durante il recupero dell'anime con ID ${id}`,
           error
         )
         return null
       }
 
       // Handle network or other errors
-      logger.error('MyAnimeList', `Error fetching anime with MAL ID ${id}`, error)
+      logger.error('MyAnimeList', `Errore durante il recupero dell'anime con ID ${id}`, error)
       throw new Error(
         `Failed to fetch anime from MyAnimeList: ${error instanceof Error ? error.message : 'Unknown error'}`
       )

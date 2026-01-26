@@ -12,7 +12,7 @@ export default class NotificationsController {
       const notifications = await Notification.query().orderBy('name', 'asc')
       return response.ok(notifications)
     } catch (error) {
-      logger.error('AppriseNotificationsController', 'Error fetching notifications', error)
+      logger.error('AppriseNotificationsController', 'Errore durante il recupero delle notifiche', error)
       return response.internalServerError({
         message: 'Error fetching notifications',
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -58,10 +58,10 @@ export default class NotificationsController {
         events: data.events ?? [],
       })
 
-      logger.info('NotificationsController', `Created notification: ${notification.name}`)
+      logger.debug('NotificationsController', `Notifica creata: ${notification.name}`)
       return response.created(notification)
     } catch (error) {
-      logger.error('AppriseNotificationsController', 'Error creating notification', error)
+      logger.error('AppriseNotificationsController', 'Errore durante la creazione della notifica', error)
       return response.internalServerError({
         message: 'Error creating notification',
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -104,10 +104,10 @@ export default class NotificationsController {
       notification.merge(data)
       await notification.save()
 
-      logger.info('NotificationsController', `Updated notification: ${notification.name}`)
+      logger.debug('NotificationsController', `Notifica aggiornata: ${notification.name}`)
       return response.ok(notification)
     } catch (error) {
-      logger.error('NotificationsController', 'Error updating notification', error)
+      logger.error('NotificationsController', 'Errore durante l\'aggiornamento della notifica', error)
       return response.internalServerError({
         message: 'Error updating notification',
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -131,12 +131,12 @@ export default class NotificationsController {
       const name = notification.name
       await notification.delete()
 
-      logger.info('NotificationsController', `Deleted notification: ${name}`)
+      logger.debug('NotificationsController', `Notifica eliminata: ${name}`)
       return response.ok({
         message: 'Notification deleted successfully',
       })
     } catch (error) {
-      logger.error('NotificationsController', 'Error deleting notification', error)
+      logger.error('NotificationsController', 'Errore durante l\'eliminazione della notifica', error)
       return response.internalServerError({
         message: 'Error deleting notification',
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -166,13 +166,13 @@ export default class NotificationsController {
         })
       }
 
-      logger.info('NotificationsController', `Test notification sent to: ${notification.name}`)
+      logger.debug('NotificationsController', `Notifica di test inviata a: ${notification.name}`)
 
       return response.ok({
         message: 'Test notification sent successfully',
       })
     } catch (error) {
-      logger.error('NotificationsController', 'Error testing notification', error)
+      logger.error('NotificationsController', 'Errore durante il test della notifica', error)
       return response.internalServerError({
         message: 'Error testing notification',
         error: error instanceof Error ? error.message : 'Unknown error',

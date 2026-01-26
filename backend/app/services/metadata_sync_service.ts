@@ -6,10 +6,15 @@ import {
   AnimeTypeToFilterType,
   AnimeworldService,
   FilterDub,
-  FilterSearchResult
+  FilterSearchResult,
 } from '#services/animeworld_service'
 import { logger } from '#services/logger_service'
-import { getSonarrService, SonarrAirDateInfo, SonarrStatistics, type SonarrSeries } from '#services/sonarr_service'
+import {
+  getSonarrService,
+  SonarrAirDateInfo,
+  SonarrStatistics,
+  type SonarrSeries,
+} from '#services/sonarr_service'
 import app from '@adonisjs/core/services/app'
 import axios from 'axios'
 import fs from 'fs/promises'
@@ -58,12 +63,12 @@ export class MetadataSyncService {
     // Get series data from Sonarr
     const sonarrShow = await this.sonarrService.getSeriesById(sonarrId)
 
-    logger.info('MetadataSync', `Syncing series: ${sonarrShow.title}`)
+    logger.debug('MetadataSync', `Sincronizzazione in corso: ${sonarrShow.title}`)
 
     const serie = await this.syncSeriesFromSonarr(sonarrShow)
     await this.syncSeasonsFromSonarr(serie, sonarrShow, refreshUrls)
 
-    logger.success('MetadataSync', `Successfully synced series: ${sonarrShow.title}`)
+    logger.success('MetadataSync', `Sincronizzazione completata: ${sonarrShow.title}`)
   }
 
   /**
@@ -125,11 +130,11 @@ export class MetadataSyncService {
       // Update existing series
       series.merge(seriesData)
       await series.save()
-      logger.info('UpdateMetadata', `Updated series: ${sonarrShow.title}`)
+      logger.debug('UpdateMetadata', `Aggiornata serie: ${sonarrShow.title}`)
     } else {
       // Create new series
       series = await Series.create(seriesData)
-      logger.success('UpdateMetadata', `Created series: ${sonarrShow.title}`)
+      logger.info('UpdateMetadata', `Creata nuova serie: ${sonarrShow.title}`)
     }
 
     return series
@@ -159,10 +164,7 @@ export class MetadataSyncService {
 
     const firstSeason = sonarrSeries.seasons.find((s) => s.seasonNumber == 1)
     if (!firstSeason) {
-      logger.warning(
-        'UpdateMetadata',
-        `No season 1 found for series ${series.title}, skipping season sync.`
-      )
+      logger.warning('UpdateMetadata', `Stagione 1 non trovata per "${series.title}"`)
       throw new Error(`No season 1 found for ${series.title}`)
     }
 
@@ -250,7 +252,10 @@ export class MetadataSyncService {
       }
     }
 
-    logger.info('UpdateMetadata', `Synced ${monitoredSeasons.length} seasons for ${series.title}`)
+    logger.debug(
+      'UpdateMetadata',
+      `Sincronizzate ${syncedSeasons.length} stagioni per "${series.title}"`
+    )
     return syncedSeasons
   }
 
@@ -304,8 +309,6 @@ export class MetadataSyncService {
             ? `${titleInfo.title} ${seasonNumber}`
             : titleInfo.title
 
-        logger.debug('UpdateMetadata', `Searching AnimeWorld for: ${searchKeyword}`)
-
         const searchResults = await this.animeworldService.searchAnime(searchKeyword)
 
         if (searchResults.length === 0) {
@@ -330,10 +333,6 @@ export class MetadataSyncService {
         }
 
         if (filteredResults.length === 0) {
-          logger.debug(
-            'UpdateMetadata',
-            `No results matching language preference: ${series.preferredLanguage}`
-          )
           continue // Try next title
         }
 
@@ -358,19 +357,23 @@ export class MetadataSyncService {
         season.downloadUrls = animeIdentifiers
         await season.save()
 
-        logger.success(
+        logger.info(
           'UpdateMetadata',
-          `Set ${animeIdentifiers.length} AnimeWorld identifier(s) for ${season.title} season ${seasonNumber}`
+          `Trovati ${animeIdentifiers.length} link per "${season.title}"`
         )
         return // Success, exit
       }
 
       logger.warning(
         'UpdateMetadata',
-        `Could not find AnimeWorld URL for ${season.title} season ${seasonNumber} after trying ${titlesToTry.length} titles`
+        `Link AnimeWorld non trovato per "${season.title}" stagione ${seasonNumber}`
       )
     } catch (error) {
-      logger.error('UpdateMetadata', `Error searching AnimeWorld for season ${seasonNumber}`, error)
+      logger.error(
+        'UpdateMetadata',
+        `Errore durante la ricerca per la stagione ${seasonNumber}`,
+        error
+      )
       // Don't throw - just log and continue
     }
   }
@@ -392,10 +395,9 @@ export class MetadataSyncService {
 
       await fs.writeFile(fullPath, buffer)
 
-      logger.debug('MetadataSync', `Downloaded poster for series ${seriesId}`)
       return filename
     } catch (error) {
-      logger.error('MetadataSync', `Error downloading poster for series ${seriesId}`, error)
+      logger.error('MetadataSync', `Errore durante il download della locandina`, error)
       return null
     }
   }
@@ -460,9 +462,9 @@ export class MetadataSyncService {
    */
   private async findMatchingSeason(series: Series, seasonNumber: number): Promise<SeasonMatch[]> {
     try {
-      logger.info(
+      logger.debug(
         'MetadataSync',
-        `Finding matching seasons for: ${series.title} Season ${seasonNumber}`
+        `Ricerca corrispondenze per: ${series.title} Stagione ${seasonNumber}`
       )
 
       const candidateTitles = await this.getAlternateTitles(series)
@@ -505,7 +507,7 @@ export class MetadataSyncService {
       const doSearchSeason = async (
         candidateTitles: string[],
         seasonYear: number[],
-        dub: FilterDub,
+        dub: FilterDub
       ) => {
         const results: FilterSearchResult[] = []
         const candidateTitlesCopy = [...candidateTitles].filter((t) => t && t.trim().length >= 2)
@@ -521,25 +523,20 @@ export class MetadataSyncService {
         return results
       }
 
-      const candidateYears = _.range(DateTime.fromISO(airDateInfo.startDate).year, DateTime.fromISO(airDateInfo.endDate).year + 1)
+      const candidateYears = _.range(
+        DateTime.fromISO(airDateInfo.startDate).year,
+        DateTime.fromISO(airDateInfo.endDate).year + 1
+      )
 
       const seasonAnimeworldResults: FilterSearchResult[] = []
 
       // Search on animeworld using each title filtered by all years during which the season could have aired
       if (shouldSearchSubbed) {
-        const results = await doSearchSeason(
-          uniqueSeriesTitles,
-          candidateYears,
-          FilterDub.Sub,
-        )
+        const results = await doSearchSeason(uniqueSeriesTitles, candidateYears, FilterDub.Sub)
         seasonAnimeworldResults.push(...results)
       }
       if (shouldSearchDubbed) {
-        const results = await doSearchSeason(
-          uniqueSeriesTitles,
-          candidateYears,
-          FilterDub.Dub,
-        )
+        const results = await doSearchSeason(uniqueSeriesTitles, candidateYears, FilterDub.Dub)
         seasonAnimeworldResults.push(...results)
       }
 
@@ -557,13 +554,13 @@ export class MetadataSyncService {
         return DateTime.fromISO(startDateA!).toMillis() - DateTime.fromISO(startDateB!).toMillis()
       })
 
-      logger.info('MetadataSync', `Found ${matches.length} season matches for: ${series.title}`)
+      logger.debug('MetadataSync', `Trovate ${matches.length} corrispondenze per "${series.title}"`)
 
       return matches
     } catch (error) {
       logger.error(
         'MetadataSync',
-        `Error finding matching seasons for series ${series.title}`,
+        `Errore durante la ricerca delle corrispondenze per "${series.title}"`,
         error
       )
       throw error
@@ -575,7 +572,10 @@ export class MetadataSyncService {
     airDateInfo: SonarrAirDateInfo,
     preferredLanguage: string
   ) {
-    const dateStartWithMargin = DateTime.fromISO(airDateInfo.startDate!).minus({ months:1, days: 10 })
+    const dateStartWithMargin = DateTime.fromISO(airDateInfo.startDate!).minus({
+      months: 1,
+      days: 10,
+    })
     const dateEndWithMargin = DateTime.fromISO(airDateInfo.endDate!).plus({ months: 1, days: 10 })
 
     const matches: SeasonMatch[] = []
@@ -596,37 +596,55 @@ export class MetadataSyncService {
         }
       }
 
-      if ( !awResult.anilistId && !awResult.malId ) continue // Skip if no AniList or MyAnimeList ID is available
+      if (!awResult.anilistId && !awResult.malId) continue // Skip if no AniList or MyAnimeList ID is available
 
-      let anilistResult: AniListMedia | null = null;
-      if ( awResult.anilistId ) {
+      let anilistResult: AniListMedia | null = null
+      if (awResult.anilistId) {
         anilistResult = await this.anilistService.getMediaById(awResult.anilistId)
       }
 
-      let myanimelistResult: MyAnimeListAnime | null = null;
-      if ( !anilistResult && awResult.malId ) {
+      let myanimelistResult: MyAnimeListAnime | null = null
+      if (!anilistResult && awResult.malId) {
         myanimelistResult = await this.myanimelistService.getMediaById(awResult.malId)
       }
-      
-      if ( !anilistResult && !myanimelistResult ) continue;
 
-      if ( anilistResult ) {
-        if ( !anilistResult.startDateUtc || !anilistResult.endDateUtc ) continue; // Skip if no start or end date
+      if (!anilistResult && !myanimelistResult) continue
+
+      if (anilistResult) {
+        if (!anilistResult.startDateUtc) continue // Skip if no start date
+        if (!anilistResult.airing && !anilistResult.endDateUtc) continue // Skip if not airing and not end date
+        if (anilistResult.aired && !anilistResult.endDateUtc) {
+          anilistResult.endDateUtc = anilistResult.startDateUtc
+        }
 
         const anilistStartDate = DateTime.fromISO(anilistResult.startDateUtc)
-        const anilistEndDate = DateTime.fromISO(anilistResult.endDateUtc)
-        if ( anilistStartDate < dateStartWithMargin || anilistEndDate > dateEndWithMargin ) {
-          continue; // Skip if AniList dates are outside the air date range with margin
+        const anilistEndDate = anilistResult.endDateUtc
+          ? DateTime.fromISO(anilistResult.endDateUtc)
+          : null
+        if (
+          anilistStartDate < dateStartWithMargin ||
+          (anilistEndDate && anilistEndDate > dateEndWithMargin)
+        ) {
+          continue // Skip if AniList dates are outside the air date range with margin
         }
       }
 
-      if ( myanimelistResult ) {
-       if ( !myanimelistResult.startDateUtc || !myanimelistResult.endDateUtc ) continue; // Skip if no start or end date
+      if (myanimelistResult) {
+        if (!myanimelistResult.startDateUtc) continue // Skip if no start or end date
+        if (!myanimelistResult.airing && !myanimelistResult.endDateUtc) continue // Skip if not airing and not end date
+        if (myanimelistResult.aired && !myanimelistResult.endDateUtc) {
+          myanimelistResult.endDateUtc = myanimelistResult.startDateUtc
+        }
 
         const myanimelistStartDate = DateTime.fromISO(myanimelistResult.startDateUtc)
-        const myanimelistEndDate = DateTime.fromISO(myanimelistResult.endDateUtc)
-        if ( myanimelistStartDate < dateStartWithMargin || myanimelistEndDate > dateEndWithMargin ) {
-          continue; // Skip if MyAnimeList dates are outside the air date range with margin
+        const myanimelistEndDate = myanimelistResult.endDateUtc
+          ? DateTime.fromISO(myanimelistResult.endDateUtc)
+          : null
+        if (
+          myanimelistStartDate < dateStartWithMargin ||
+          (myanimelistEndDate && myanimelistEndDate > dateEndWithMargin)
+        ) {
+          continue // Skip if MyAnimeList dates are outside the air date range with margin
         }
       }
 

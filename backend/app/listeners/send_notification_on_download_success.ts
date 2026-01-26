@@ -27,17 +27,17 @@ export default class SendNotificationOnDownloadSuccess {
       for (const notification of filteredNotifications) {
         try {
           await notificationService.sendToUrl(notification.url, title, message, 'success')
-          logger.info('NotificationListener', `Sent download success notification to ${notification.name}`)
+          logger.debug('NotificationListener', `Notifica di download completato inviata a ${notification.name}`)
         } catch (error) {
           logger.error(
             'NotificationListener',
-            `Failed to send notification to ${notification.name}`,
+            `Impossibile inviare la notifica a ${notification.name}`,
             error
           )
         }
       }
     } catch (error) {
-      logger.error('NotificationListener', 'Error handling download success event', error)
+      logger.error('NotificationListener', 'Errore durante la gestione dell\'evento di download completato', error)
     }
   }
 }

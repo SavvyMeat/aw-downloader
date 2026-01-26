@@ -72,15 +72,10 @@ export class FetchWantedTask extends BaseTask {
 
       this.wantedEpisodes.push(...filteredEpisodes)
 
-      logger.debug(
-        'FetchWanted',
-        `Page ${currentPage}: Found ${filteredEpisodes.length} episodes`
-      )
-
       currentPage++
     } while ((currentPage - 1) * pageSize < totalRecords)
 
-    logger.info('FetchWanted', `Found ${this.wantedEpisodes.length} wanted/missing episodes`)
+    logger.info('FetchWanted', `Trovati ${this.wantedEpisodes.length} episodi mancanti`)
 
     // Ensure all series exist in local database
     await this.syncWantedSeriesMetadata()
@@ -133,7 +128,7 @@ export class FetchWantedTask extends BaseTask {
         if (!series || !season) {
           logger.warning(
             'FetchWanted',
-            `Series ${wantedEp.series.title} Season ${wantedEp.seasonNumber} not found in database`
+            `Serie "${wantedEp.series.title}" Stagione ${wantedEp.seasonNumber} non trovata nel database`
           )
           continue
         }
@@ -157,13 +152,13 @@ export class FetchWantedTask extends BaseTask {
         if (!downloadUrl) {
           logger.warning(
             'FetchWanted',
-            `No download URL found for: ${wantedEp.series.title} S${wantedEp.seasonNumber}E${wantedEp.episodeNumber}`
+            `Link di download non trovato per: ${wantedEp.series.title} S${wantedEp.seasonNumber}E${wantedEp.episodeNumber}`
           )
           continue
         }
 
         // Add to queue
-        const queueItemId = queue.addToQueue({
+        queue.addToQueue({
           seriesId: series.id,
           seasonId: season.id,
           episodeId: wantedEp.id,
@@ -175,19 +170,18 @@ export class FetchWantedTask extends BaseTask {
         })
 
         addedCount++
-        logger.success(
+        logger.info(
           'FetchWanted',
-          `Added to queue: ${wantedEp.series.title} S${wantedEp.seasonNumber}E${wantedEp.episodeNumber}`,
-          { queueItemId }
+          `Aggiunto alla coda: ${wantedEp.series.title} S${wantedEp.seasonNumber}E${wantedEp.episodeNumber}`
         )
       } catch (error) {
-        logger.error('FetchWanted', 'Error adding episode to queue', error.message)
+        logger.error('FetchWanted', 'Errore durante l\'aggiunta dell\'episodio alla coda', error)
       }
     }
 
     logger.info(
       'FetchWanted',
-      `Added ${addedCount} episodes to download queue (${skippedCount} already in queue)`
+      `Aggiunti ${addedCount} episodi alla coda (${skippedCount} già presenti)`
     )
   }
 
@@ -202,7 +196,7 @@ export class FetchWantedTask extends BaseTask {
     try {
 
       if (!season.downloadUrls || season.downloadUrls.length === 0) {
-        logger.warning('FetchWanted', `No anime identifiers for episode ${episode.id}`)
+        logger.warning('FetchWanted', `Nessun identificatore anime disponibile per l\'episodio`)
         return null
       }
 
@@ -213,32 +207,20 @@ export class FetchWantedTask extends BaseTask {
       if (!episodeNumberToSearch) {
         logger.warning(
           'FetchWanted',
-          `Cannot determine episode number to search for episode ${episode.id}`
+          `Impossibile determinare il numero dell\'episodio da cercare`
         )
         return null
       }
 
       // Pass all identifiers to handle multi-part series
-      logger.debug(
-        'FetchWanted',
-        `Searching for episode ${episodeNumberToSearch} in ${season.downloadUrls.length} part(s)`
-      )
-
       const downloadLink = await this.animeworldService.findEpisodeDownloadLink(
         season.downloadUrls,
         episodeNumberToSearch
       )
 
-      if (downloadLink) {
-        logger.success(
-          'FetchWanted',
-          `Found download link for ${episode.series.title} S${episode.seasonNumber}E${episode.episodeNumber}`
-        )
-      }
-
       return downloadLink
     } catch (error) {
-      logger.error('FetchWanted', `Error finding download URL for episode ${episode.id}`, error)
+      logger.error('FetchWanted', `Errore durante la ricerca del link di download`, error)
       return null
     }
   }

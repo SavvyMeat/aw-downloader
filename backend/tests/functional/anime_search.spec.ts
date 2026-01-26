@@ -69,6 +69,14 @@ const rezeroSeasons = [
   },
 ]
 
+// Test data for My Hero Academia movie
+const myHeroAcademiaMovie = {
+  title: "My Hero Academia: World Heroes' Mission",
+  from: '2021-08-06T00:00:00.000Z',
+  to: '2021-08-06T23:59:59.999Z',
+  expectedResults: ['boku-no-hero-academia-the-movie-3-world-heroes-mission-ita.TXzOW'],
+}
+
 test.group('Anime Search Integration', () => {
   test("search all seasons of JoJo's Bizarre Adventure on AnimeWorld", async ({ assert }) => {
     const animeworldService = new AnimeworldService()
@@ -183,6 +191,57 @@ test.group('Anime Search Integration', () => {
 
     }
 
-  }).timeout(120000)
+  }).tags(['@anime'], 'append').timeout(120000)
+
+  test("search My Hero Academia: World Heroes' Mission movie on AnimeWorld", async ({ assert }) => {
+    const animeworldService = new AnimeworldService()
+    const candidateTitles = [
+      "My Hero Academia: World Heroes' Mission",
+      "Boku no Hero Academia THE MOVIE: World Heroes' Mission",
+    ]
+
+    logger.info(`\n=== My Hero Academia Movie Search ===$`)
+    logger.info(`\n--- Testing: ${myHeroAcademiaMovie.title} (${myHeroAcademiaMovie.from}-${myHeroAcademiaMovie.to}) ---`)
+
+    // Extract years from UTC dates
+    const fromDate = new Date(myHeroAcademiaMovie.from)
+    const toDate = new Date(myHeroAcademiaMovie.to)
+    const years: number[] = []
+    for (let year = fromDate.getUTCFullYear(); year <= toDate.getUTCFullYear(); year++) {
+      years.push(year)
+    }
+
+    // Search on AnimeWorld with year filter and Movie type
+    const animeworldResults = []
+    const candidateTitlesCopy = [...candidateTitles]
+    while (animeworldResults.length === 0 && candidateTitlesCopy.length > 0) {
+      const sonarrName = candidateTitlesCopy.shift()!
+      const res = await animeworldService.searchAnimeWithFilter({
+        keyword: sonarrName,
+        type: [FilterType.Movie],
+        dub: FilterDub.Dub,
+        seasonYear: years,
+      })
+      animeworldResults.push(...res)
+    }
+
+    // Assert - AnimeWorld should return results
+    assert.isArray(animeworldResults)
+    assert.isNotEmpty(animeworldResults, `Should find results using titles ${candidateTitles.join(', ')}`)
+
+    const metadataSyncService = new MetadataSyncService()
+    const parsedResults = await metadataSyncService.parseAnimeWorldResults(animeworldResults, {
+      hasValidAirDate: true,
+      startDate: myHeroAcademiaMovie.from,
+      endDate: myHeroAcademiaMovie.to
+    }, 'dub')
+
+    // Check if expected results are found
+    const foundIdentifiers = parsedResults.map((r) => r.animeworldIdentifier)
+    logger.info(`\nExpected identifiers: ${myHeroAcademiaMovie.expectedResults.join(', ')}`)
+    logger.info(`Found identifiers: ${foundIdentifiers.join(', ')}`)
+
+    assert.isTrue(foundIdentifiers.toSorted().join(',') == myHeroAcademiaMovie.expectedResults.toSorted().join(','), `Should find expected identifier for ${myHeroAcademiaMovie.title}`)
+  }).tags(['@movies'], 'append').timeout(120000)
   
 })

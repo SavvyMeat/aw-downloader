@@ -65,7 +65,6 @@ export class DownloadEpisodesTask {
     try {
       // Check if cancelled before starting
       if (this.isCancelled(queueItemId)) {
-        console.log(`Download ${queueItemId} was cancelled before starting`)
         this.removeCancelled(queueItemId)
         return
       }
@@ -78,7 +77,6 @@ export class DownloadEpisodesTask {
       
       // Check if cancelled after getting file size
       if (this.isCancelled(queueItemId)) {
-        console.log(`Download ${queueItemId} was cancelled`)
         this.removeCancelled(queueItemId)
         return
       }
@@ -103,7 +101,6 @@ export class DownloadEpisodesTask {
       }
       
       // Download chunks in parallel using workers
-      console.log(`Downloading ${chunks.length} chunks with ${maxWorkers} workers...`)
       await this.downloadChunks(params.downloadUrl, chunks, queue, queueItemId, fileSize)
       
       // Check if cancelled after download
@@ -115,7 +112,6 @@ export class DownloadEpisodesTask {
       }
       
       // Merge chunks
-      console.log(`Merging chunks...`)
       const outputPath = app.tmpPath(
         'downloads',
         `${string.random(16)}.${fileExtension.replace(/^\.*/, '')}`
@@ -227,7 +223,6 @@ export class DownloadEpisodesTask {
     
     const promises = chunks.map(async (chunk) => {
       try {
-        console.log(`Starting chunk ${chunk.chunkIndex}: bytes ${chunk.start}-${chunk.end}`)
         
         // Download chunk with byte range
         const response = await axios({
@@ -269,7 +264,6 @@ export class DownloadEpisodesTask {
         // Wait for write to complete
         await new Promise<void>((resolve, reject) => {
           writer.on('finish', () => {
-            console.log(`Completed chunk ${chunk.chunkIndex}`)
             completedChunks.add(chunk.chunkIndex)
             resolve()
           })
@@ -359,12 +353,12 @@ export class DownloadEpisodesTask {
         .first()
 
       if (!series) {
-        logger.error('DownloadTask', `Series ${params.seriesId} not found`)
+        logger.error('DownloadTask', `Serie ${params.seriesTitle} non trovata`)
         return
       }
 
       if (!series.sonarrId) {
-        logger.error('DownloadTask', `Series ${params.seriesId} has no Sonarr ID`)
+        logger.error('DownloadTask', `La serie ${params.seriesTitle} non ha un ID Sonarr associato`)
         return
       }
 
@@ -374,7 +368,7 @@ export class DownloadEpisodesTask {
       const sonarrSeries = await sonarrService.getSeriesById(series.sonarrId)
 
       if (!sonarrSeries.path) {
-        logger.error('DownloadTask', `Series ${series.sonarrId} has no path in Sonarr`)
+        logger.error('DownloadTask', `La serie ${params.seriesTitle} non ha un percorso configurato in Sonarr`)
         return
       }
 
@@ -392,19 +386,19 @@ export class DownloadEpisodesTask {
       const sonarrFilename = `${sanitizedTitle} - S${seasonStr}E${episodeStr}${extension}`
       const destinationPath = path.join(localSeriesPath, sonarrFilename)
 
-      logger.info('DownloadTask', `Copying file to Sonarr folder: ${destinationPath}`)
+      logger.debug('DownloadTask', `Copia del file nella cartella Sonarr in corso...`)
 
       // Copy file to Sonarr folder
       await fs.copyFile(downloadedFilePath, destinationPath)
 
-      logger.success('DownloadTask', `File copied successfully to ${destinationPath}`)
+      logger.success('DownloadTask', `File copiato con successo`)
 
       // Trigger Sonarr rescan
       await sonarrService.rescanSeries(series.sonarrId)
-      logger.success('DownloadTask', `Successfully triggered rescan for ${series.title}`)
+      logger.success('DownloadTask', `Scansione della serie avviata`)
 
     } catch (error) {
-      logger.error('DownloadTask', 'Failed to copy file to Sonarr and trigger rescan', error.message)
+      logger.error('DownloadTask', 'Impossibile copiare il file o avviare la scansione', error)
       // Don't throw - the download was successful, just the copy/rescan failed
     }
   }
@@ -427,14 +421,14 @@ export class DownloadEpisodesTask {
         
         if (episode.episodeFileId) {
           await sonarrService.renameEpisodeFile(episode)
-          logger.success('DownloadTask', `Successfully renamed ${seriesTitle} S${seasonNumber}E${episodeNumber}`)
+          logger.success('DownloadTask', `File rinominato: ${seriesTitle} S${seasonNumber}E${episodeNumber}`)
         } else {
-          logger.warning('DownloadTask', `Episode file ID not found for ${seriesTitle} S${seasonNumber}E${episodeNumber}, skipping rename`)
+          logger.warning('DownloadTask', `ID del file non trovato per ${seriesTitle} S${seasonNumber}E${episodeNumber}, impossibile rinominare`)
         }
       }
 
     } catch (error) {
-      logger.error('DownloadTask', 'Failed to rename episode file.', error.message)
+      logger.error('DownloadTask', 'Impossibile rinominare il file dell\'episodio', error)
       // Don't throw - the download was successful, just the copy/rescan failed
     }
   }

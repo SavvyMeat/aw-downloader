@@ -12,7 +12,7 @@ export default class RootFoldersController {
       const rootFolders = await RootFolder.query().orderBy('path', 'asc')
       return response.ok(rootFolders)
     } catch (error) {
-      logger.error('RootFoldersController', 'Error fetching root folders', error)
+      logger.error('RootFoldersController', 'Errore durante il recupero delle cartelle root', error)
       return response.internalServerError({
         message: 'Error fetching root folders',
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -56,7 +56,7 @@ export default class RootFoldersController {
         }
         
         if (deletedFolders.length > 0) {
-          logger.info('RootFoldersController', `Removed ${deletedFolders.length} root folders no longer in Sonarr`)
+          logger.debug('RootFoldersController', `Rimosse ${deletedFolders.length} cartelle root non più presenti in Sonarr`)
         }
       }
 
@@ -84,9 +84,9 @@ export default class RootFoldersController {
         }
       }
 
-      logger.success(
+      logger.info(
         'RootFoldersController',
-        `Synced root folders: ${syncedCount} new, ${updatedCount} updated`
+        `Cartelle root sincronizzate: ${syncedCount} nuove, ${updatedCount} aggiornate`
       )
 
       // Return updated list
@@ -99,7 +99,7 @@ export default class RootFoldersController {
         rootFolders,
       })
     } catch (error) {
-      logger.error('RootFoldersController', 'Error syncing root folders', error?.message)
+      logger.error('RootFoldersController', 'Errore durante la sincronizzazione delle cartelle root', error)
       return response.internalServerError({
         message: 'Error syncing root folders from Sonarr',
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -118,17 +118,12 @@ export default class RootFoldersController {
       rootFolder.mappedPath = mappedPath || null
       await rootFolder.save()
 
-      logger.info('RootFoldersController', `Updated mapping for root folder ${rootFolder.id}`, {
-        path: rootFolder.path,
-        mappedPath: rootFolder.mappedPath,
-      })
-
       return response.ok({
         message: 'Root folder mapping updated',
         rootFolder,
       })
     } catch (error) {
-      logger.error('RootFoldersController', 'Error updating root folder mapping', error)
+      logger.error('RootFoldersController', 'Errore durante l\'aggiornamento del mapping della cartella root', error)
       return response.internalServerError({
         message: 'Error updating root folder mapping',
         error: error instanceof Error ? error.message : 'Unknown error',

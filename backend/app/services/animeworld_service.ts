@@ -99,7 +99,7 @@ export class AnimeworldService {
 
     try {
       const baseUrl = await this.getBaseUrl()
-      logger.info('AnimeWorld', `Inizializzazione sessione su ${baseUrl}`)
+      // Removed info log - too technical for users
 
       // Regex patterns to extract CSRF token and cookies
       const csrfTokenRegex = /<meta.*?id="csrf-token"\s*?content="(.*?)">/
@@ -122,7 +122,6 @@ export class AnimeworldService {
         if (cookieMatch) {
           const cookieName = cookieMatch[1]
           const cookieValue = cookieMatch[2]
-          logger.debug('AnimeWorld', `Cookie trovato: ${cookieName}`)
           await this.cookieJar.setCookie(`${cookieName}=${cookieValue}`, baseUrl)
           continue // Try again to get CSRF token
         }
@@ -131,15 +130,14 @@ export class AnimeworldService {
         const csrfMatch = html.match(csrfTokenRegex)
         if (csrfMatch) {
           this.csrfToken = csrfMatch[1]
-          logger.debug('AnimeWorld', `CSRF token trovato`)
           break
         }
       }
 
       this.isInitialized = true
-      logger.success('AnimeWorld', 'Sessione inizializzata con successo')
+      logger.debug('AnimeWorld', 'Sessione inizializzata')
     } catch (error) {
-      logger.error('AnimeWorld', 'Errore inizializzazione sessione', error)
+      logger.error('AnimeWorld', 'Errore durante l\'inizializzazione della sessione', error)
       throw error
     }
   }
@@ -179,7 +177,7 @@ export class AnimeworldService {
       const data = JSON.parse(response.body) as AnimeSearchResponse
       return data.animes || []
     } catch (error) {
-      logger.error('AnimeWorld', `Errore ricerca anime "${keyword}"`, error.message)
+      logger.error('AnimeWorld', `Errore durante la ricerca di "${keyword}"`, error)
       throw new Error(
         `Failed to search anime: ${error instanceof Error ? error.message : 'Unknown error'}`
       )
@@ -275,9 +273,7 @@ export class AnimeworldService {
     // Sort by ID to maintain correct order
     parts.sort((a, b) => a.id - b.id)
 
-    logger.info('AnimeWorld', `Trovate ${parts.length} parti per "${bestMatch.name}"`, {
-      parts: parts.map((p) => ({ id: p.id, name: p.name })),
-    })
+    logger.info('AnimeWorld', `Trovate ${parts.length} parti per "${bestMatch.name}"`)
 
     return parts
   }
@@ -311,7 +307,7 @@ export class AnimeworldService {
 
         logger.debug(
           'AnimeWorld',
-          `Parte ${index + 1}: ${episodeNumbers.length} episodi (offset: ${episodeOffset})`
+          `Parte ${index + 1}: ${episodeNumbers.length} episodi`
         )
 
         // Renumber episodes with offset
@@ -327,7 +323,7 @@ export class AnimeworldService {
       } catch (error) {
         logger.error(
           'AnimeWorld',
-          `Errore recupero episodi dalla parte ${index + 1}: ${identifier}`,
+          `Errore durante il recupero degli episodi dalla parte ${index + 1}`,
           error
         )
         // Continue with next identifier instead of failing completely
@@ -336,7 +332,7 @@ export class AnimeworldService {
 
     logger.info(
       'AnimeWorld',
-      `Totale episodi da ${animeIdentifiers.length} parti: ${Object.keys(allEpisodes).length}`
+      `Recuperati ${Object.keys(allEpisodes).length} episodi totali`
     )
     return allEpisodes
   }
@@ -351,7 +347,6 @@ export class AnimeworldService {
       await this.initializeSession()
 
       const animePageUrl = await this.buildAnimeUrl(animeIdentifier)
-      logger.debug('AnimeWorld', `Recupero episodi da: ${animePageUrl}`)
 
       const response = await this.gotInstance.get(animePageUrl, {
         headers: {
@@ -379,10 +374,10 @@ export class AnimeworldService {
         }
       })
 
-      logger.info('AnimeWorld', `Trovati ${Object.keys(episodes).length} episodi`)
+      logger.debug('AnimeWorld', `Trovati ${Object.keys(episodes).length} episodi`)
       return episodes
     } catch (error) {
-      logger.error('AnimeWorld', `Errore recupero episodi per ${animeIdentifier}`, error.message)
+      logger.error('AnimeWorld', `Errore durante il recupero degli episodi`, error)
       throw new Error(
         `Failed to fetch episodes: ${error instanceof Error ? error.message : 'Unknown error'}`
       )
@@ -398,8 +393,6 @@ export class AnimeworldService {
     try {
       await this.initializeSession()
 
-      logger.debug('AnimeWorld', `Recupero link download da: ${episodeUrl}`)
-
       const response = await this.gotInstance.get(episodeUrl, {
         headers: {
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -412,14 +405,13 @@ export class AnimeworldService {
       const downloadLink = $('#download center a[download]').attr('href')
 
       if (downloadLink) {
-        logger.success('AnimeWorld', `Link download trovato`)
         return downloadLink
       }
 
-      logger.warning('AnimeWorld', 'Nessun link download trovato')
+      logger.warning('AnimeWorld', 'Link per il download non disponibile')
       return null
     } catch (error) {
-      logger.error('AnimeWorld', `Errore recupero link download da ${episodeUrl}`, error)
+      logger.error('AnimeWorld', `Errore durante il recupero del link per il download`, error)
       return null
     }
   }
@@ -446,7 +438,7 @@ export class AnimeworldService {
 
       // Check if the episode exists
       if (!episodes[episodeNumber]) {
-        logger.warning('AnimeWorld', `Episodio ${episodeNumber} non trovato`)
+        logger.warning('AnimeWorld', `Episodio ${episodeNumber} non disponibile`)
         return null
       }
 
@@ -454,7 +446,7 @@ export class AnimeworldService {
       const downloadLink = await this.getDownloadLinkFromEpisode(episodes[episodeNumber])
       return downloadLink
     } catch (error) {
-      logger.error('AnimeWorld', `Errore ricerca episodio ${episodeNumber}`)
+      logger.error('AnimeWorld', `Errore durante la ricerca dell'episodio ${episodeNumber}`, error)
       return null
     }
   }
@@ -504,7 +496,6 @@ export class AnimeworldService {
       )
 
       const fullUrl = `${filterUrl}?${params.toString()}`
-      logger.debug('AnimeWorld', `Ricerca con filtro: ${fullUrl}`)
 
       const response = await this.gotInstance.get(fullUrl, {
         headers: {
@@ -537,7 +528,6 @@ export class AnimeworldService {
       })
 
       // Fetch MAL ID and AniList ID for each result
-      logger.debug('AnimeWorld', `Recupero malId e anilistId per ${results.length} risultati`)
       for (const result of results) {
         try {
           const animePageUrl = await this.buildAnimeUrl(result.identifier)
@@ -587,21 +577,16 @@ export class AnimeworldService {
               result.anilistId = parseInt(anilistIdAttr, 10)
             }
           }
-
-          logger.debug(
-            'AnimeWorld',
-            `${result.title}: malId=${result.malId}, anilistId=${result.anilistId}`
-          )
         } catch (error) {
-          logger.warning('AnimeWorld', `Errore recupero ID per ${result.title}`, error)
+          logger.warning('AnimeWorld', `Impossibile recuperare gli ID per "${result.title}"`, error)
           // Continue with next result even if one fails
         }
       }
 
-      logger.info('AnimeWorld', `Trovati ${results.length} risultati per ${keyword} con filtro`)
+      logger.debug('AnimeWorld', `Trovati ${results.length} risultati con filtro`)
       return results
     } catch (error) {
-      logger.error('AnimeWorld', 'Errore ricerca con filtro', error)
+      logger.error('AnimeWorld', 'Errore durante la ricerca con filtro', error)
       throw new Error(
         `Failed to search with filter: ${error instanceof Error ? error.message : 'Unknown error'}`
       )
