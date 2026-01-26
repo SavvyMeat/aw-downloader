@@ -3,6 +3,25 @@ import got, { Got } from 'got'
 import { CookieJar } from 'tough-cookie'
 import * as cheerio from 'cheerio'
 import { logger } from '#services/logger_service'
+import _ from 'lodash'
+import QueryString from 'qs'
+
+export enum FilterType {
+  Anime = 0,
+  Movie = 4,
+  Ova = 1,
+  Ona = 2,
+}
+
+export enum FilterDub {
+  Sub = 0,
+  Dub = 1,
+}
+
+export const AnimeTypeToFilterType: Record<string, FilterType[]> = {
+  Anime: [FilterType.Anime, FilterType.Ona],
+  Movie: [FilterType.Movie],
+}
 
 export interface AnimeSearchResult {
   id: number
@@ -19,6 +38,15 @@ export interface AnimeSearchResponse {
   users: unknown[]
 }
 
+export interface FilterSearchResult {
+  title: string
+  jtitle: string
+  identifier: string
+  dub: FilterDub
+  malId?: number | null
+  anilistId?: number | null
+}
+
 export class AnimeworldService {
   private gotInstance: Got
   private cookieJar: CookieJar
@@ -29,7 +57,7 @@ export class AnimeworldService {
   constructor() {
     // Create cookie jar
     this.cookieJar = new CookieJar()
-    
+
     // Create got instance with cookie support and SSL disabled
     this.gotInstance = got.extend({
       cookieJar: this.cookieJar,
@@ -40,7 +68,8 @@ export class AnimeworldService {
         request: 10000,
       },
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36',
         'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
       },
     })
@@ -53,7 +82,7 @@ export class AnimeworldService {
     if (this.baseUrlCache) {
       return this.baseUrlCache
     }
-    
+
     const baseUrl = await Config.get('animeworld_base_url')
     const url = (baseUrl || 'https://www.animeworld.ac').replace(/^\/+|\/+$/g, '')
     this.baseUrlCache = url
@@ -71,23 +100,23 @@ export class AnimeworldService {
     try {
       const baseUrl = await this.getBaseUrl()
       logger.info('AnimeWorld', `Inizializzazione sessione su ${baseUrl}`)
-      
+
       // Regex patterns to extract CSRF token and cookies
       const csrfTokenRegex = /<meta.*?id="csrf-token"\s*?content="(.*?)">/
       const cookieRegex = /document\.cookie\s*?=\s*?"(.+?)=(.+?)(\s*?;\s*?path=.+?)?"\s*?;/
-      
+
       // Try up to 2 times to get the token
       for (let attempt = 0; attempt < 2; attempt++) {
         // Visit the homepage to get cookies and CSRF token
         const response = await this.gotInstance.get(baseUrl, {
           headers: {
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
           },
           followRedirect: true,
         })
-        
+
         const html = response.body
-        
+
         // Try to extract cookie from JavaScript
         const cookieMatch = html.match(cookieRegex)
         if (cookieMatch) {
@@ -97,7 +126,7 @@ export class AnimeworldService {
           await this.cookieJar.setCookie(`${cookieName}=${cookieValue}`, baseUrl)
           continue // Try again to get CSRF token
         }
-        
+
         // Try to extract CSRF token
         const csrfMatch = html.match(csrfTokenRegex)
         if (csrfMatch) {
@@ -106,7 +135,7 @@ export class AnimeworldService {
           break
         }
       }
-      
+
       this.isInitialized = true
       logger.success('AnimeWorld', 'Sessione inizializzata con successo')
     } catch (error) {
@@ -124,7 +153,7 @@ export class AnimeworldService {
     try {
       // Initialize session first (visit homepage to get cookies and CSRF token)
       await this.initializeSession()
-      
+
       const baseUrl = await this.getBaseUrl()
       const searchUrl = `${baseUrl}/api/search/v2`
 
@@ -132,9 +161,10 @@ export class AnimeworldService {
       const headers: Record<string, string> = {
         'Accept': 'application/json, text/plain, */*',
         'Referer': baseUrl,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36'
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36',
       }
-      
+
       if (this.csrfToken) {
         headers['csrf-token'] = this.csrfToken
       }
@@ -150,7 +180,9 @@ export class AnimeworldService {
       return data.animes || []
     } catch (error) {
       logger.error('AnimeWorld', `Errore ricerca anime "${keyword}"`, error.message)
-      throw new Error(`Failed to search anime: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      throw new Error(
+        `Failed to search anime: ${error instanceof Error ? error.message : 'Unknown error'}`
+      )
     }
   }
 
@@ -186,14 +218,19 @@ export class AnimeworldService {
    * @param targetTitle - The title to match against
    * @returns Array of matching animes (base + parts) ordered by ID, or null
    */
-  findBestMatchWithParts(searchResults: AnimeSearchResult[], targetTitle: string): AnimeSearchResult[] | null {
+  findBestMatchWithParts(
+    searchResults: AnimeSearchResult[],
+    targetTitle: string
+  ): AnimeSearchResult[] | null {
     const normalizeTitle = (title: string): string => {
-      return title
-        .toLowerCase()
-        // Remove language in parentheses e.g., "Title (ita)" or "Title (sub ita)"
-        .replace(/(\(\S*\))/g, '')
-        .replace(/[^a-z0-9\s]/gi, '')
-        .trim()
+      return (
+        title
+          .toLowerCase()
+          // Remove language in parentheses e.g., "Title (ita)" or "Title (sub ita)"
+          .replace(/(\(\S*\))/g, '')
+          .replace(/[^a-z0-9\s]/gi, '')
+          .trim()
+      )
     }
 
     const normalizedTarget = normalizeTitle(targetTitle)
@@ -201,10 +238,10 @@ export class AnimeworldService {
     const bestMatch = searchResults.find((anime) => {
       const animeName = normalizeTitle(anime.name)
       const normalizedJTitle = normalizeTitle(anime.jtitle)
-      
+
       const partPattern = new RegExp(`^${normalizedTarget}$`, 'i')
       const match = animeName.match(partPattern) || normalizedJTitle.match(partPattern)
-      
+
       return match
     })
 
@@ -219,18 +256,18 @@ export class AnimeworldService {
 
     searchResults.forEach((anime) => {
       if (anime.id === bestMatch.id) return // Skip the base match
-      
+
       const animeName = normalizeTitle(anime.name)
       const normalizedJTitle = normalizeTitle(anime.jtitle)
-      
+
       // Check if this is a "Part X" of the base title
       // Patterns: "Title Part 2", "Title Part2", "Title Part 2 ita"
-      // Note: "part" keyword is required to avoid matching sequential seasons      
+      // Note: "part" keyword is required to avoid matching sequential seasons
       const titlePattern = new RegExp(`^${baseTitle} \\s*(part[e]? (\\d+)).*`, 'i')
       const jtitlePattern = new RegExp(`^${baseJTitle} \\s*(part[e]? (\\d+)).*`, 'i')
       const match = animeName.match(titlePattern) || normalizedJTitle.match(jtitlePattern)
 
-      if ( match ) {
+      if (match) {
         parts.push(anime)
       }
     })
@@ -238,8 +275,8 @@ export class AnimeworldService {
     // Sort by ID to maintain correct order
     parts.sort((a, b) => a.id - b.id)
 
-    logger.info('AnimeWorld', `Trovate ${parts.length} parti per "${bestMatch.name}"`, { 
-      parts: parts.map(p => ({ id: p.id, name: p.name }))
+    logger.info('AnimeWorld', `Trovate ${parts.length} parti per "${bestMatch.name}"`, {
+      parts: parts.map((p) => ({ id: p.id, name: p.name })),
     })
 
     return parts
@@ -252,7 +289,7 @@ export class AnimeworldService {
    */
   private async buildAnimeUrl(identifier: string): Promise<string> {
     const baseUrl = await this.getBaseUrl()
-    const sanitizedIdentifier = identifier.replace(/^\/+|\/+$/g, '') // rimuove slash iniziali e finali dall'identificatore
+    const sanitizedIdentifier = identifier.replace(/^\/+|\/+$/g, '') // rimuove slash iniziali e finali dall'identifier
     return `${baseUrl}/play/${sanitizedIdentifier}`
   }
 
@@ -268,9 +305,14 @@ export class AnimeworldService {
     for (const [index, identifier] of animeIdentifiers.entries()) {
       try {
         const episodes = await this.getEpisodesFromPage(identifier)
-        const episodeNumbers = Object.keys(episodes).map(Number).sort((a, b) => a - b)
+        const episodeNumbers = Object.keys(episodes)
+          .map(Number)
+          .sort((a, b) => a - b)
 
-        logger.debug('AnimeWorld', `Parte ${index + 1}: ${episodeNumbers.length} episodi (offset: ${episodeOffset})`)
+        logger.debug(
+          'AnimeWorld',
+          `Parte ${index + 1}: ${episodeNumbers.length} episodi (offset: ${episodeOffset})`
+        )
 
         // Renumber episodes with offset
         for (const episodeNum of episodeNumbers) {
@@ -283,12 +325,19 @@ export class AnimeworldService {
           episodeOffset += Math.max(...episodeNumbers)
         }
       } catch (error) {
-        logger.error('AnimeWorld', `Errore recupero episodi dalla parte ${index + 1}: ${identifier}`, error)
+        logger.error(
+          'AnimeWorld',
+          `Errore recupero episodi dalla parte ${index + 1}: ${identifier}`,
+          error
+        )
         // Continue with next identifier instead of failing completely
       }
     }
 
-    logger.info('AnimeWorld', `Totale episodi da ${animeIdentifiers.length} parti: ${Object.keys(allEpisodes).length}`)
+    logger.info(
+      'AnimeWorld',
+      `Totale episodi da ${animeIdentifiers.length} parti: ${Object.keys(allEpisodes).length}`
+    )
     return allEpisodes
   }
 
@@ -306,7 +355,7 @@ export class AnimeworldService {
 
       const response = await this.gotInstance.get(animePageUrl, {
         headers: {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         },
       })
 
@@ -333,7 +382,7 @@ export class AnimeworldService {
       logger.info('AnimeWorld', `Trovati ${Object.keys(episodes).length} episodi`)
       return episodes
     } catch (error) {
-      logger.error('AnimeWorld', `Errore recupero episodi per ${animeIdentifier}`, error. message)
+      logger.error('AnimeWorld', `Errore recupero episodi per ${animeIdentifier}`, error.message)
       throw new Error(
         `Failed to fetch episodes: ${error instanceof Error ? error.message : 'Unknown error'}`
       )
@@ -353,7 +402,7 @@ export class AnimeworldService {
 
       const response = await this.gotInstance.get(episodeUrl, {
         headers: {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         },
       })
 
@@ -390,9 +439,10 @@ export class AnimeworldService {
       const identifiers = Array.isArray(animeIdentifiers) ? animeIdentifiers : [animeIdentifiers]
 
       // Get all episodes from all pages
-      const episodes = identifiers.length > 1 
-        ? await this.getEpisodesFromMultiplePages(identifiers)
-        : await this.getEpisodesFromPage(identifiers[0])
+      const episodes =
+        identifiers.length > 1
+          ? await this.getEpisodesFromMultiplePages(identifiers)
+          : await this.getEpisodesFromPage(identifiers[0])
 
       // Check if the episode exists
       if (!episodes[episodeNumber]) {
@@ -406,6 +456,155 @@ export class AnimeworldService {
     } catch (error) {
       logger.error('AnimeWorld', `Errore ricerca episodio ${episodeNumber}`)
       return null
+    }
+  }
+
+  /**
+   * Search anime using filter page
+   * @param type - Type parameter (Anime = 0, Movie = 4)
+   * @param dub - Dub parameter (Sub = 0, Dub = 1)
+   * @param keyword - Search keyword
+   * @returns Array of filter search results
+   */
+  async searchAnimeWithFilter({
+    keyword,
+    seasonYear,
+    season,
+    type = FilterType.Anime,
+    dub = FilterDub.Sub,
+  }: {
+    keyword: string
+    type?: FilterType | FilterType[]
+    dub?: FilterDub
+    seasonYear?: number | number[] | null
+    season?: string | null
+  }): Promise<FilterSearchResult[]> {
+    // Validate keyword length
+    if (!keyword || keyword.trim().length < 2) {
+      throw new Error('Keyword must be at least 2 characters long. Received: ' + keyword)
+    }
+
+    try {
+      await this.initializeSession()
+
+      const baseUrl = await this.getBaseUrl()
+      const filterUrl = `${baseUrl}/filter`
+
+      // Build query parameters
+      const params = QueryString.stringify(
+        {
+          type: _.castArray(type), // Enable type filter if seasonYear is provided
+          dub: dub.toString(),
+          sort: '0',
+          keyword: keyword.trim(),
+          season: season ? season : '',
+          year: seasonYear ? _.castArray(seasonYear) : '',
+        },
+        { arrayFormat: 'repeat' }
+      )
+
+      const fullUrl = `${filterUrl}?${params.toString()}`
+      logger.debug('AnimeWorld', `Ricerca con filtro: ${fullUrl}`)
+
+      const response = await this.gotInstance.get(fullUrl, {
+        headers: {
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        },
+      })
+
+      const $ = cheerio.load(response.body)
+      const results: FilterSearchResult[] = []
+
+      // Find all items with selector '.film-list .item .name'
+      $('.film-list .item .name').each((_, element) => {
+        const title = $(element).text().trim()
+        const jtitle = $(element).attr('data-jtitle')?.trim() || ''
+        const href = $(element).attr('href')
+
+        const serializedTitle = title.replace(/\(TV\)|\(ITA\)/g, ' ').trim()
+        const serializedJTitle = jtitle.replace(/\(TV\)|\(ITA\)/g, ' ').trim()
+
+        if (title && href) {
+          results.push({
+            title: serializedTitle,
+            jtitle: serializedJTitle,
+            identifier: href.trim().replace(/^\/play\//, ''),
+            dub,
+            malId: null,
+            anilistId: null,
+          })
+        }
+      })
+
+      // Fetch MAL ID and AniList ID for each result
+      logger.debug('AnimeWorld', `Recupero malId e anilistId per ${results.length} risultati`)
+      for (const result of results) {
+        try {
+          const animePageUrl = await this.buildAnimeUrl(result.identifier)
+          const pageResponse = await this.gotInstance.get(animePageUrl, {
+            headers: {
+              Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            },
+          })
+
+          const page$ = cheerio.load(pageResponse.body)
+
+          // Try to find MAL ID and AniList ID from links or data attributes
+          // Common patterns:
+          // - Links like: https://myanimelist.net/anime/12345
+          // - Links like: https://anilist.co/anime/12345
+          // - Data attributes: data-mal-id, data-anilist-id
+
+          // Search for MAL link
+          const malLink = page$('a[href*="myanimelist.net/anime/"]').attr('href')
+          if (malLink) {
+            const malIdMatch = malLink.match(/\/anime\/(\d+)/)
+            if (malIdMatch) {
+              result.malId = parseInt(malIdMatch[1], 10)
+            }
+          }
+
+          // Search for AniList link
+          const anilistLink = page$('a[href*="anilist.co/anime/"]').attr('href')
+          if (anilistLink) {
+            const anilistIdMatch = anilistLink.match(/\/anime\/(\d+)/)
+            if (anilistIdMatch) {
+              result.anilistId = parseInt(anilistIdMatch[1], 10)
+            }
+          }
+
+          // Try data attributes as fallback
+          if (!result.malId) {
+            const malIdAttr = page$('[data-mal-id]').attr('data-mal-id')
+            if (malIdAttr) {
+              result.malId = parseInt(malIdAttr, 10)
+            }
+          }
+
+          if (!result.anilistId) {
+            const anilistIdAttr = page$('[data-anilist-id]').attr('data-anilist-id')
+            if (anilistIdAttr) {
+              result.anilistId = parseInt(anilistIdAttr, 10)
+            }
+          }
+
+          logger.debug(
+            'AnimeWorld',
+            `${result.title}: malId=${result.malId}, anilistId=${result.anilistId}`
+          )
+        } catch (error) {
+          logger.warning('AnimeWorld', `Errore recupero ID per ${result.title}`, error)
+          // Continue with next result even if one fails
+        }
+      }
+
+      logger.info('AnimeWorld', `Trovati ${results.length} risultati per ${keyword} con filtro`)
+      return results
+    } catch (error) {
+      logger.error('AnimeWorld', 'Errore ricerca con filtro', error)
+      throw new Error(
+        `Failed to search with filter: ${error instanceof Error ? error.message : 'Unknown error'}`
+      )
     }
   }
 }
