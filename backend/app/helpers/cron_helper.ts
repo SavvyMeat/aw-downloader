@@ -74,7 +74,14 @@ class CronHelper {
       return `*/${minutes} * * * *`
     }
     const hours = Math.floor(minutes / 60)
-    return `0 */${hours} * * *`
+    if ( hours < 24 ) {
+      return `0 */${hours} * * *`
+    }
+    const days = Math.floor(hours / 24)
+    if ( days < 7 ) {
+      return `0 0 */${days} * *`
+    }
+    return `0 0 2 * *`
   }
 
   /**
@@ -141,7 +148,7 @@ class CronHelper {
       cronExpression: taskInstance.cronExpression,
       status: taskInstance.task.status,
       lastRunAt: taskInstance.task.lastRunAt?.toISO() || null,
-      nextRunAt: taskInstance.schedule?.getNextRun() || null,
+      nextRunAt: taskInstance.task.nextRunAt?.toISO() || null,
       lastError: taskInstance.task.lastError,
     }))
   }
