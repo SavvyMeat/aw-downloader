@@ -15,19 +15,36 @@ import {
 import { Activity, Trash2, RefreshCw, Info, AlertTriangle, CheckCircle, Bug, XCircle } from "lucide-react";
 import { fetchLogs, clearLogs, LogLevel, type LogEntry } from "@/lib/api";
 
+// Log level hierarchy for filtering (higher number = more severe)
+const LOG_LEVEL_SEVERITY: Record<LogLevel | "all", number> = {
+  all: 0,
+  [LogLevel.DEBUG]: 1,
+  [LogLevel.INFO]: 2,
+  [LogLevel.SUCCESS]: 3,
+  [LogLevel.WARNING]: 3,
+  [LogLevel.ERROR]: 4,
+};
+
 export function LogsCard() {
-  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [allLogs, setAllLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filterLevel, setFilterLevel] = useState<LogLevel | "all">("all");
+  const [filterLevel, setFilterLevel] = useState<LogLevel>(() => {
+    // Load from localStorage on mount
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("logs-filter-level");
+      return (saved as LogLevel) || LogLevel.INFO;
+    }
+    return LogLevel.INFO;
+  });
   const [autoRefresh, setAutoRefresh] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const loadLogs = async () => {
     try {
-      const params = filterLevel !== "all" ? { level: filterLevel, limit: 100 } : { limit: 100 };
-      const data = await fetchLogs(params);
-      setLogs(data.logs);
+      // Always fetch all logs and filter client-side
+      const data = await fetchLogs({ limit: 100 });
+      setAllLogs(data.logs);
       setError(null);
     } catch (err) {
       console.error("Error fetching logs:", err);
@@ -37,6 +54,13 @@ export function LogsCard() {
     }
   };
 
+  // Filter logs based on severity
+  const filteredLogs = allLogs.filter(log => {
+    const logSeverity = LOG_LEVEL_SEVERITY[log.level];
+    const filterSeverity = LOG_LEVEL_SEVERITY[filterLevel];
+    return logSeverity >= filterSeverity;
+  });
+
   useEffect(() => {
     loadLogs();
 
@@ -44,13 +68,21 @@ export function LogsCard() {
       const interval = setInterval(loadLogs, 5000); // Poll every 5 seconds
       return () => clearInterval(interval);
     }
-  }, [autoRefresh, filterLevel]);
+  }, [autoRefresh]);
+
+  // Save filter level to localStorage when it changes
+  const handleFilterChange = (value: string) => {
+    const newLevel = value as LogLevel;
+    setFilterLevel(newLevel);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("logs-filter-level", newLevel);
+    }
+  };
 
   const handleClear = async () => {
     try {
       await clearLogs();
-      setLogs([]);
-      console.log("Log cancellati con successo");
+      setAllLogs([]);
     } catch (err) {
       console.error("Errore cancellazione log:", err);
     }
@@ -113,18 +145,16 @@ export function LogsCard() {
           <div className="flex items-center gap-2">
             <Select
               value={filterLevel}
-              onValueChange={(value: string) => setFilterLevel(value as LogLevel | "all")}
+              onValueChange={handleFilterChange}
             >
               <SelectTrigger className="w-full sm:w-[140px]">
                 <SelectValue placeholder="Filtra livello" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Tutti</SelectItem>
-                <SelectItem value={LogLevel.ERROR}>Errori</SelectItem>
-                <SelectItem value={LogLevel.WARNING}>Warning</SelectItem>
-                <SelectItem value={LogLevel.SUCCESS}>Success</SelectItem>
-                <SelectItem value={LogLevel.INFO}>Info</SelectItem>
                 <SelectItem value={LogLevel.DEBUG}>Debug</SelectItem>
+                <SelectItem value={LogLevel.INFO}>Info</SelectItem>
+                <SelectItem value={LogLevel.WARNING}>Alert</SelectItem>
+                <SelectItem value={LogLevel.ERROR}>Error</SelectItem>
               </SelectContent>
             </Select>
             <Button
@@ -161,13 +191,13 @@ export function LogsCard() {
                 Riprova
               </Button>
             </div>
-          ) : logs.length === 0 ? (
+          ) : filteredLogs.length === 0 ? (
             <div className="flex items-center justify-center p-6 sm:p-8 text-muted-foreground text-xs sm:text-sm">
               Nessun log disponibile
             </div>
           ) : (
             <div className="space-y-1.5 sm:space-y-2">
-              {logs.map((log) => (
+              {filteredLogs.map((log) => (
                 <div
                   key={log.id}
                   className="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-3 text-xs sm:text-sm border-b pb-1.5 sm:pb-2 last:border-0"

@@ -1,11 +1,28 @@
 "use client";
 
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Edit2, Save, X, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { fetchConfigs, updateSeasonDownloadUrls, type Season } from "@/lib/api";
+import {
+    closestCenter,
+    DndContext,
+    DragEndEvent,
+    KeyboardSensor,
+    PointerSensor,
+    useSensor,
+    useSensors,
+} from "@dnd-kit/core";
+import { restrictToParentElement, restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import {
+    arrayMove,
+    SortableContext,
+    sortableKeyboardCoordinates,
+    verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { Edit2, Loader2, Plus, Save, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { updateSeasonDownloadUrls, type Season } from "@/lib/api";
+import { SortableLinkItem } from "./sortable-link-item";
 
 interface SeasonCardProps {
     season: Season;
@@ -25,32 +42,51 @@ export function SeasonCard({
     onUpdate,
 }: SeasonCardProps) {
     const [isEditing, setIsEditing] = useState(false);
-    const [editUrls, setEditUrls] = useState("");
+    const [editUrls, setEditUrls] = useState<Array<{ id: string; value: string }>>([]);
     const [saving, setSaving] = useState(false);
+    const [baseUrl, setBaseUrl] = useState("https://www.animeworld.ac");
 
     const downloadUrls = season.downloadUrls && season.downloadUrls.length > 0
         ? season.downloadUrls
         : [];
 
+    const sensors = useSensors(
+        useSensor(PointerSensor),
+        useSensor(KeyboardSensor, {
+            coordinateGetter: sortableKeyboardCoordinates,
+        })
+    );
+
+    useEffect(() => {
+        fetchConfigs().then((configs) => {
+            const url = configs.animeworld_base_url || "https://www.animeworld.ac";
+            setBaseUrl(url.replace(/^\/+|\/+$/g, ''));
+        }).catch(() => {
+            // Fallback to default
+        });
+    }, []);
+
     const handleEditUrls = () => {
         setIsEditing(true);
         const urls = downloadUrls.length > 0
-            ? downloadUrls.join("\n")
-            : "";
+            ? downloadUrls.map((url, index) => ({
+                id: `${season.id}-${index}`,
+                value: url,
+            }))
+            : [];
         setEditUrls(urls);
     };
 
     const handleCancelEdit = () => {
         setIsEditing(false);
-        setEditUrls("");
+        setEditUrls([]);
     };
 
     const handleSaveUrls = async () => {
         setSaving(true);
         try {
             const urlsArray = editUrls
-                .split("\n")
-                .map((url) => url.trim())
+                .map((item) => item.value.trim())
                 .filter((url) => url.length > 0);
 
             await updateSeasonDownloadUrls(season.id, {
@@ -58,7 +94,7 @@ export function SeasonCard({
             });
 
             setIsEditing(false);
-            setEditUrls("");
+            setEditUrls([]);
             toast.success("Identificatori aggiornati");
 
             if (onUpdate) {
@@ -68,6 +104,55 @@ export function SeasonCard({
             toast.error(err instanceof Error ? err.message : "Errore salvataggio");
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleAddLink = () => {
+        const newId = `${season.id}-${Date.now()}`;
+        setEditUrls([...editUrls, { id: newId, value: "" }]);
+    };
+
+    const handleRemoveLink = (id: string) => {
+        setEditUrls(editUrls.filter((item) => item.id !== id));
+    };
+
+    const handleLinkChange = (id: string, value: string) => {
+        // Estrae l'identificatore se viene incollato un URL completo
+        let identifier = value.trim();
+        
+        // Controlla se contiene /play/
+        if (identifier.includes('/play/')) {
+            const parts = identifier.split('/play/');
+            identifier = parts[parts.length - 1];
+        }
+        
+        // Rimuove eventuali protocolli e domini rimasti
+        identifier = identifier.replace(/^https?:\/\/[^/]+\/?/, '');
+        
+        // Estrae solo la parte che finisce con .xxxxx (punto + 5 caratteri alfanumerici)
+        // e rimuove tutto quello che viene dopo (es: /episodio-1)
+        const match = identifier.match(/^([^/]+\.[a-zA-Z0-9]{5})/);
+        if (match) {
+            identifier = match[1];
+        } else {
+            // Se non trova il pattern, rimuove solo eventuali slash finali e parti dopo il primo slash
+            identifier = identifier.split('/')[0];
+        }
+        
+        setEditUrls(editUrls.map((item) => 
+            item.id === id ? { ...item, value: identifier } : item
+        ));
+    };
+
+    const handleDragEnd = (event: DragEndEvent) => {
+        const { active, over } = event;
+
+        if (over && active.id !== over.id) {
+            setEditUrls((items) => {
+                const oldIndex = items.findIndex((item) => item.id === active.id);
+                const newIndex = items.findIndex((item) => item.id === over.id);
+                return arrayMove(items, oldIndex, newIndex);
+            });
         }
     };
 
@@ -113,18 +198,55 @@ export function SeasonCard({
             {isEditing ? (
                 <div className="space-y-3">
                     <div>
-                        <label className="block text-sm font-medium mb-2">
-                            Identificatori Anime (uno per riga)
-                        </label>
-                        <textarea
-                            value={editUrls}
-                            onChange={(e) => setEditUrls(e.target.value)}
-                            className="w-full h-32 px-3 py-2 border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring font-mono text-sm"
-                            placeholder="one-piece.12345&#10;one-piece-part-2.12346"
-                        />
-                        <p className="text-xs text-muted-foreground mt-1">
-                            Inserisci un identificatore per riga (es: one-piece.12345).
-                            Verranno combinati con il dominio base per creare gli URL completi.
+                        <div className="flex items-center justify-between mb-2">
+                            <label className="block text-sm font-medium">
+                                Identificatori Anime
+                            </label>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleAddLink}
+                                className="h-7"
+                            >
+                                <Plus className="h-3 w-3 mr-1" />
+                                Aggiungi
+                            </Button>
+                        </div>
+                        
+                        <DndContext
+                            sensors={sensors}
+                            collisionDetection={closestCenter}
+                            onDragEnd={handleDragEnd}
+                            modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+                        >
+                            <SortableContext
+                                items={editUrls.map((item) => item.id)}
+                                strategy={verticalListSortingStrategy}
+                            >
+                                <div className="space-y-1 max-h-80 overflow-y-auto pr-1">
+                                    {editUrls.length === 0 ? (
+                                        <div className="text-sm text-muted-foreground italic text-center py-4 border-2 border-dashed rounded-md">
+                                            Nessun identificatore. Clicca "Aggiungi" per iniziare.
+                                        </div>
+                                    ) : (
+                                        editUrls.map((item) => (
+                                            <SortableLinkItem
+                                                key={item.id}
+                                                id={item.id}
+                                                value={item.value}
+                                                isEditing={true}
+                                                baseUrl={baseUrl}
+                                                onChange={(value) => handleLinkChange(item.id, value)}
+                                                onRemove={() => handleRemoveLink(item.id)}
+                                            />
+                                        ))
+                                    )}
+                                </div>
+                            </SortableContext>
+                        </DndContext>
+                        
+                        <p className="text-xs text-muted-foreground mt-2">
+                            Trascina gli identificatori per riordinarli. Verranno combinati con {baseUrl}/play/ per creare gli URL completi.
                         </p>
                     </div>
 
@@ -164,14 +286,15 @@ export function SeasonCard({
                             <p className="text-sm font-medium text-foreground">
                                 Identificatori Anime ({downloadUrls.length}):
                             </p>
-                            <div className="bg-muted rounded p-3 max-h-32 overflow-y-auto">
+                            <div className="space-y-1 max-h-64 overflow-y-auto">
                                 {downloadUrls.map((url: string, index: number) => (
-                                    <div
+                                    <SortableLinkItem
                                         key={index}
-                                        className="text-xs text-muted-foreground font-mono truncate"
-                                    >
-                                        {url}
-                                    </div>
+                                        id={`view-${index}`}
+                                        value={url}
+                                        isEditing={false}
+                                        baseUrl={baseUrl}
+                                    />
                                 ))}
                             </div>
                         </div>

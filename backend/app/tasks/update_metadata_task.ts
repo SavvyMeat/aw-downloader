@@ -49,7 +49,7 @@ export class UpdateMetadataTask extends BaseTask {
         }
       })
 
-    logger.info('UpdateMetadata', `Found ${monitoredSeries.length} monitored series to sync`)
+    logger.info('UpdateMetadata', `Trovate ${monitoredSeries.length} serie monitorate da sincronizzare`)
 
     // Get all existing series IDs from Sonarr
     const sonarrIds = monitoredSeries.map((show) => show.id)
@@ -67,6 +67,6 @@ export class UpdateMetadataTask extends BaseTask {
       await this.metadataSyncService.syncSeries(sonarrShow.id)
     }
 
-    logger.success('UpdateMetadata', 'Metadata sync completed')
+    logger.success('UpdateMetadata', 'Sincronizzazione metadati completata')
   }
 }

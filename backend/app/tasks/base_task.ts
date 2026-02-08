@@ -71,7 +71,7 @@ export abstract class BaseTask {
    * Run the task with error handling
    */
   async run(): Promise<void> {
-    logger.info('Task', `Executing task: ${this.name}`)
+    logger.debug('Task', `Esecuzione task: ${this.name}`)
 
     try {
       this.updateStatus({
@@ -87,9 +87,9 @@ export abstract class BaseTask {
         nextRunAt: DateTime.now().plus({ minutes: this.intervalMinutes }),
       })
 
-      logger.success('Task', `Task ${this.name} completed successfully`)
+      logger.debug('Task', `Task "${this.name}" completato con successo`)
     } catch (error) {
-      logger.error('Task', `Error executing task ${this.name}`, error.message)
+      logger.error('Task', `Errore durante l'esecuzione del task "${this.name}"`, error)
 
       this.updateStatus({
         status: 'error',

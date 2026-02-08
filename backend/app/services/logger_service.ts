@@ -1,3 +1,6 @@
+import app from '@adonisjs/core/services/app'
+import adonisLogger from '@adonisjs/core/services/logger'
+
 export enum LogLevel {
   DEBUG = 'debug',
   INFO = 'info',
@@ -24,13 +27,29 @@ class LoggerService {
    * Add a log entry
    */
   private addLog(level: LogLevel, category: string, message: string, details?: any): void {
+    // Sanitize error details to avoid showing full stack traces to users
+    let sanitizedDetails = details
+    if (details instanceof Error) {
+      sanitizedDetails = {
+        message: details.message,
+        ...(app.inDev && { stack: details.stack }),
+      }
+    } else if (details && typeof details === 'object' && details.stack) {
+      // Remove stack traces from error-like objects
+      const { stack, ...rest } = details
+      sanitizedDetails = {
+        ...rest,
+        ...(app.inDev && { stack }),
+      }
+    }
+
     const log: LogEntry = {
       id: `log-${++this.logIdCounter}`,
       timestamp: new Date(),
       level,
       category,
       message,
-      details,
+      details: sanitizedDetails,
     }
 
     this.logs.unshift(log) // Add to beginning
@@ -40,22 +59,22 @@ class LoggerService {
       this.logs = this.logs.slice(0, this.maxLogs)
     }
 
-    // Also log to console with appropriate method
-    const consoleMessage = `[${category}] ${message}`
+    // Log using AdonisJS logger
+    const context = { category, ...(sanitizedDetails && { details: sanitizedDetails }) }
     switch (level) {
       case LogLevel.ERROR:
-        console.error(consoleMessage, details || '')
+        adonisLogger.error(context, message)
         break
       case LogLevel.WARNING:
-        console.warn(consoleMessage, details || '')
+        adonisLogger.warn(context, message)
         break
       case LogLevel.DEBUG:
-        console.debug(consoleMessage, details || '')
+        adonisLogger.debug(context, message)
         break
       case LogLevel.SUCCESS:
       case LogLevel.INFO:
       default:
-        console.log(consoleMessage, details || '')
+        adonisLogger.info(context, message)
         break
     }
   }

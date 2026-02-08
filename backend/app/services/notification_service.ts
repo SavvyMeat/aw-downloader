@@ -14,20 +14,19 @@ export class NotificationService {
       const notifications = await Notification.query().where('enabled', true)
       
       if (notifications.length === 0) {
-        logger.debug('NotificationService', 'No enabled notifications configured')
         return
       }
 
       for (const notification of notifications) {
         try {
           await this.sendToUrl(notification.url, title, body, notificationType)
-          logger.info('NotificationService', `Notification sent to: ${notification.name}`)
+          logger.debug('NotificationService', `Notifica inviata a: ${notification.name}`)
         } catch (error) {
-          logger.error('NotificationService', `Failed to send notification to ${notification.name}`, error)
+          logger.error('NotificationService', `Impossibile inviare la notifica a ${notification.name}`, error)
         }
       }
     } catch (error) {
-      logger.error('NotificationService', 'Error sending notifications', error)
+      logger.error('NotificationService', 'Errore durante l\'invio delle notifiche', error)
     }
   }
 
@@ -48,7 +47,7 @@ export class NotificationService {
         throw new Error(stderr)
       }
     } catch (error) {
-      logger.error('NotificationService', 'Error executing apprise command', error.message)
+      logger.error('NotificationService', 'Errore durante l\'esecuzione del comando apprise', error)
       throw error
     }
   }
@@ -61,7 +60,7 @@ export class NotificationService {
       await this.sendToUrl(url, 'Test Notification', 'This is a test notification from AW-Downloader', 'info')
       return true
     } catch (error) {
-      logger.error('NotificationService', 'Test notification failed', error.message)
+      logger.error('NotificationService', 'Test della notifica fallito', error)
       return false
     }
   }

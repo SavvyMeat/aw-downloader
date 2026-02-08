@@ -107,7 +107,7 @@ export class DownloadQueue extends EventEmitter {
     const item = this.activeDownloads.get(id)
     
     if (item) {
-      logger.warning('DownloadQueue', `Cancelling download: ${item.seriesTitle} S${item.seasonNumber}E${item.episodeNumber}`)
+      logger.warning('DownloadQueue', `Annullamento download in corso: ${item.seriesTitle} S${item.seasonNumber}E${item.episodeNumber}`)
       
       // Signal to the download task that it should stop
       const { DownloadEpisodesTask } = await import('../tasks/download_episodes_task.js')
@@ -125,9 +125,9 @@ export class DownloadQueue extends EventEmitter {
         const tempDir = app.tmpPath(`downloads/${id}`)
         
         await fs.rm(tempDir, { recursive: true, force: true })
-        logger.success('DownloadQueue', `Removed partial files for: ${item.seriesTitle} S${item.seasonNumber}E${item.episodeNumber}`)
+        logger.success('DownloadQueue', `File temporanei rimossi per: ${item.seriesTitle} S${item.seasonNumber}E${item.episodeNumber}`)
       } catch (error) {
-        logger.error('DownloadQueue', `Error removing partial files for ${id}`, error)
+        logger.error('DownloadQueue', `Errore durante la rimozione dei file temporanei`, error)
       }
       
       // Continue processing queue
@@ -139,7 +139,7 @@ export class DownloadQueue extends EventEmitter {
     // If not active, try to remove from pending queue
     const removed = this.removeFromQueue(id)
     if (removed) {
-      logger.info('DownloadQueue', `Removed pending item from queue: ${id}`)
+      logger.debug('DownloadQueue', `Elemento rimosso dalla coda in attesa: ${id}`)
     }
     return removed
   }
@@ -275,7 +275,7 @@ export class DownloadQueue extends EventEmitter {
         item.id
       )
     } catch (error) {
-      logger.error('DownloadQueue', `Error in download task for ${item.seriesTitle} S${item.seasonNumber}E${item.episodeNumber}`, error)
+      logger.error('DownloadQueue', `Errore durante il download di ${item.seriesTitle} S${item.seasonNumber}E${item.episodeNumber}`, error)
       // The task should have already marked it as failed, but just in case
       if (this.activeDownloads.has(item.id)) {
         this.failItem(item.id, error instanceof Error ? error.message : 'Unknown error')

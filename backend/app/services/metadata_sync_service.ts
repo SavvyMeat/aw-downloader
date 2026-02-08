@@ -1,18 +1,58 @@
-import { getSonarrService, SonarrStatistics, type SonarrSeries } from '#services/sonarr_service'
-import { AnimeworldService } from '#services/animeworld_service'
-import Series from '#models/series'
+import Config from '#models/config'
 import Season from '#models/season'
+import Series from '#models/series'
+import { AniListMedia, AniListService } from '#services/anilist_service'
+import {
+  AnimeTypeToFilterType,
+  AnimeworldService,
+  FilterDub,
+  FilterSearchResult,
+} from '#services/animeworld_service'
 import { logger } from '#services/logger_service'
-import { DateTime } from 'luxon'
+import {
+  getSonarrService,
+  SonarrAirDateInfo,
+  SonarrStatistics,
+  type SonarrSeries,
+} from '#services/sonarr_service'
+import app from '@adonisjs/core/services/app'
 import axios from 'axios'
 import fs from 'fs/promises'
-import app from '@adonisjs/core/services/app'
+import _ from 'lodash'
+import { DateTime } from 'luxon'
 import path from 'path'
-import Config from '#models/config'
+import { MyAnimeListAnime, MyAnimeListService } from './myanimelist_service.js'
+
+export interface SeasonMatch {
+  animeworldTitle: string
+  animeworldIdentifier: string
+  anilistId?: number
+  anilistTitle?: string
+  anilistStartDate?: string | null
+  malId?: number
+  malTitle?: string
+  malStartDate?: string | null
+  sonarrStartDate: string | null
+  sonarrEndDate: string | null
+}
+
+export interface AnimeSeason {
+  seasonNumber: number
+  startDate: string
+  endDate: string
+  seasonYear: number | null
+  season: 'WINTER' | 'SPRING' | 'SUMMER' | 'FALL'
+  episodes: number | null
+  format: string
+  anilistId: number
+  titles: string[]
+}
 
 export class MetadataSyncService {
   private sonarrService = getSonarrService()
   private animeworldService = new AnimeworldService()
+  private anilistService = new AniListService()
+  private myanimelistService = new MyAnimeListService()
 
   /**
    * Sync metadata for a single series
@@ -23,12 +63,12 @@ export class MetadataSyncService {
     // Get series data from Sonarr
     const sonarrShow = await this.sonarrService.getSeriesById(sonarrId)
 
-    logger.info('MetadataSync', `Syncing series: ${sonarrShow.title}`)
+    logger.debug('MetadataSync', `Sincronizzazione in corso: ${sonarrShow.title}`)
 
     const serie = await this.syncSeriesFromSonarr(sonarrShow)
     await this.syncSeasonsFromSonarr(serie, sonarrShow, refreshUrls)
 
-    logger.success('MetadataSync', `Successfully synced series: ${sonarrShow.title}`)
+    logger.success('MetadataSync', `Sincronizzazione completata: ${sonarrShow.title}`)
   }
 
   /**
@@ -90,11 +130,11 @@ export class MetadataSyncService {
       // Update existing series
       series.merge(seriesData)
       await series.save()
-      logger.info('UpdateMetadata', `Updated series: ${sonarrShow.title}`)
+      logger.debug('UpdateMetadata', `Aggiornata serie: ${sonarrShow.title}`)
     } else {
       // Create new series
       series = await Series.create(seriesData)
-      logger.success('UpdateMetadata', `Created series: ${sonarrShow.title}`)
+      logger.info('UpdateMetadata', `Creata nuova serie: ${sonarrShow.title}`)
     }
 
     return series
@@ -107,27 +147,24 @@ export class MetadataSyncService {
   ): Promise<Season[]> {
     // Filter only monitored seasons and exclude season 0 (specials)
     const candidateSeasons = sonarrSeries.seasons.filter(
-      (season) => season.statistics.episodeCount > 0 && season.seasonNumber > 0
+      (season) => season.statistics.episodeCount > 0 && season.seasonNumber > 0 && season.monitored
     )
 
     // Filter seasons with valid episodes (async check)
     const monitoredSeasons = []
     for (const sonarrSeason of candidateSeasons) {
-      const hasValidEpisodes = await this.sonarrService.seasonHasValidEpisodes(
+      const { hasValidAirDate } = await this.sonarrService.getSeasonAirDateInfo(
         sonarrSeries.id,
         sonarrSeason.seasonNumber
       )
-      if (hasValidEpisodes) {
+      if (hasValidAirDate) {
         monitoredSeasons.push(sonarrSeason)
       }
     }
 
     const firstSeason = sonarrSeries.seasons.find((s) => s.seasonNumber == 1)
     if (!firstSeason) {
-      logger.warning(
-        'UpdateMetadata',
-        `No season 1 found for series ${series.title}, skipping season sync.`
-      )
+      logger.warning('UpdateMetadata', `Stagione 1 non trovata per "${series.title}"`)
       throw new Error(`No season 1 found for ${series.title}`)
     }
 
@@ -199,15 +236,26 @@ export class MetadataSyncService {
         season = await Season.create(seasonData)
       }
 
-      // Try to find AnimeWorld URL if not already set
-      if (!season.downloadUrls || season.downloadUrls.length === 0 || forceRefresh) {
-        await this.searchAndSetAnimeworldUrl(series, season, sonarrSeason.seasonNumber)
-      }
-
       syncedSeasons.push(season)
     }
 
-    logger.info('UpdateMetadata', `Synced ${monitoredSeasons.length} seasons for ${series.title}`)
+    for (const season of syncedSeasons) {
+      if (!season.downloadUrls || season.downloadUrls.length === 0 || forceRefresh) {
+        await series.load('seasons')
+        const seasonMatch = await this.findMatchingSeason(series, season.seasonNumber)
+        if (seasonMatch && seasonMatch.length > 0) {
+          season.downloadUrls = seasonMatch.map((s) => s.animeworldIdentifier)
+          await season.save()
+        } else {
+          await this.searchAndSetAnimeworldUrl(series, season, season.seasonNumber)
+        }
+      }
+    }
+
+    logger.debug(
+      'UpdateMetadata',
+      `Sincronizzate ${syncedSeasons.length} stagioni per "${series.title}"`
+    )
     return syncedSeasons
   }
 
@@ -261,8 +309,6 @@ export class MetadataSyncService {
             ? `${titleInfo.title} ${seasonNumber}`
             : titleInfo.title
 
-        logger.debug('UpdateMetadata', `Searching AnimeWorld for: ${searchKeyword}`)
-
         const searchResults = await this.animeworldService.searchAnime(searchKeyword)
 
         if (searchResults.length === 0) {
@@ -287,10 +333,6 @@ export class MetadataSyncService {
         }
 
         if (filteredResults.length === 0) {
-          logger.debug(
-            'UpdateMetadata',
-            `No results matching language preference: ${series.preferredLanguage}`
-          )
           continue // Try next title
         }
 
@@ -315,19 +357,23 @@ export class MetadataSyncService {
         season.downloadUrls = animeIdentifiers
         await season.save()
 
-        logger.success(
+        logger.info(
           'UpdateMetadata',
-          `Set ${animeIdentifiers.length} AnimeWorld identifier(s) for ${season.title} season ${seasonNumber}`
+          `Trovati ${animeIdentifiers.length} link per "${season.title}"`
         )
         return // Success, exit
       }
 
       logger.warning(
         'UpdateMetadata',
-        `Could not find AnimeWorld URL for ${season.title} season ${seasonNumber} after trying ${titlesToTry.length} titles`
+        `Link AnimeWorld non trovato per "${season.title}" stagione ${seasonNumber}`
       )
     } catch (error) {
-      logger.error('UpdateMetadata', `Error searching AnimeWorld for season ${seasonNumber}`, error)
+      logger.error(
+        'UpdateMetadata',
+        `Errore durante la ricerca per la stagione ${seasonNumber}`,
+        error
+      )
       // Don't throw - just log and continue
     }
   }
@@ -349,10 +395,9 @@ export class MetadataSyncService {
 
       await fs.writeFile(fullPath, buffer)
 
-      logger.debug('MetadataSync', `Downloaded poster for series ${seriesId}`)
       return filename
     } catch (error) {
-      logger.error('MetadataSync', `Error downloading poster for series ${seriesId}`, error)
+      logger.error('MetadataSync', `Errore durante il download della locandina`, error)
       return null
     }
   }
@@ -369,5 +414,253 @@ export class MetadataSyncService {
       default:
         return 'cancelled'
     }
+  }
+
+  private async getAlternateTitles(
+    series: Series
+  ): Promise<
+    Array<{ title: string; isSeasonSpecific: boolean; specificSeasonNumber: number | null }>
+  > {
+    // Build list of titles to try with metadata about their origin
+    const titlesToTry: Array<{
+      title: string
+      isSeasonSpecific: boolean
+      specificSeasonNumber: number | null
+    }> = [{ title: series.title, isSeasonSpecific: false, specificSeasonNumber: null }]
+
+    // Add alternate titles if available, filtering by sceneSeasonNumber
+    if (series.alternateTitles) {
+      try {
+        const alternates = JSON.parse(series.alternateTitles) as Array<{
+          title: string
+          sceneSeasonNumber: number
+        }>
+
+        // Filter: include titles where sceneSeasonNumber < 0 (all seasons)
+        // or sceneSeasonNumber === seasonNumber (specific season)
+        const relevantAlternates = alternates
+          .filter((alt) => alt.sceneSeasonNumber < 0)
+          .map((alt) => ({
+            title: alt.title,
+            isSeasonSpecific: alt.sceneSeasonNumber >= 0,
+            specificSeasonNumber: alt.sceneSeasonNumber,
+          }))
+
+        titlesToTry.push(...relevantAlternates)
+      } catch {
+        // Ignore JSON parse errors
+      }
+    }
+
+    return titlesToTry
+  }
+
+  /**
+   * Find matching seasons between a series and AnimeWorld/AniList results
+   * @param series - The Sonarr series to match
+   * @returns Array of season matches with metadata
+   */
+  private async findMatchingSeason(series: Series, seasonNumber: number): Promise<SeasonMatch[]> {
+    try {
+      logger.debug(
+        'MetadataSync',
+        `Ricerca corrispondenze per: ${series.title} Stagione ${seasonNumber}`
+      )
+
+      const candidateTitles = await this.getAlternateTitles(series)
+
+      const airDateInfo = await this.sonarrService.getSeasonAirDateInfo(
+        series.sonarrId,
+        seasonNumber
+      )
+
+      if (!airDateInfo.startDate || !airDateInfo.endDate) {
+        return [] // Skip seasons without valid air date
+      }
+
+      const baseSeriesTitlesFromAnilist = await this.anilistService
+        .searchAnime(series.title, series.year)
+        .then((media) => Object.values(media?.title || {}).filter((t) => t) as string[])
+        .catch(() => [])
+
+      const sanitizedSeriesTitles = [
+        series.title,
+        ...candidateTitles
+          .filter(
+            (t) =>
+              !t.isSeasonSpecific || (t.isSeasonSpecific && t.specificSeasonNumber === seasonNumber)
+          )
+          .map((t) => t.title),
+        ...baseSeriesTitlesFromAnilist,
+      ]
+        .map((t) => t.replace(/\(\d{4}\)/g, '')) // Remove years in parentheses like (2024)
+        .map((t) => t.replace(/\(TV\)/gi, '')) // Remove (TV) case-insensitive
+        .map((t) => t.trim()) // Trim after removals
+      const uniqueSeriesTitles = _.uniq(sanitizedSeriesTitles.map((t) => t.trim()))
+
+      // Search on AnimeWorld using filters
+      const shouldSearchSubbed =
+        series.preferredLanguage === 'sub' || series.preferredLanguage === 'dub_fallback_sub'
+      const shouldSearchDubbed =
+        series.preferredLanguage === 'dub' || series.preferredLanguage === 'dub_fallback_sub'
+
+      const doSearchSeason = async (
+        candidateTitles: string[],
+        seasonYear: number[],
+        dub: FilterDub
+      ) => {
+        const results: FilterSearchResult[] = []
+        const candidateTitlesCopy = [...candidateTitles].filter((t) => t && t.trim().length >= 2)
+        while (results.length === 0 && candidateTitlesCopy.length > 0) {
+          const res = await this.animeworldService.searchAnimeWithFilter({
+            keyword: candidateTitlesCopy.shift()!,
+            type: AnimeTypeToFilterType['Anime'],
+            dub,
+            seasonYear,
+          })
+          results.push(...res)
+        }
+        return results
+      }
+
+      const candidateYears = _.range(
+        DateTime.fromISO(airDateInfo.startDate).year,
+        DateTime.fromISO(airDateInfo.endDate).year + 1
+      )
+
+      const seasonAnimeworldResults: FilterSearchResult[] = []
+
+      // Search on animeworld using each title filtered by all years during which the season could have aired
+      if (shouldSearchSubbed) {
+        const results = await doSearchSeason(uniqueSeriesTitles, candidateYears, FilterDub.Sub)
+        seasonAnimeworldResults.push(...results)
+      }
+      if (shouldSearchDubbed) {
+        const results = await doSearchSeason(uniqueSeriesTitles, candidateYears, FilterDub.Dub)
+        seasonAnimeworldResults.push(...results)
+      }
+
+      const matches: SeasonMatch[] = await this.parseAnimeWorldResults(
+        seasonAnimeworldResults,
+        airDateInfo,
+        series.preferredLanguage
+      )
+
+      matches.sort((a: SeasonMatch, b: SeasonMatch) => {
+        // Order by start date ascending
+        const startDateA = a.anilistStartDate || a.malStartDate
+        const startDateB = b.anilistStartDate || b.malStartDate
+
+        return DateTime.fromISO(startDateA!).toMillis() - DateTime.fromISO(startDateB!).toMillis()
+      })
+
+      logger.debug('MetadataSync', `Trovate ${matches.length} corrispondenze per "${series.title}"`)
+
+      return matches
+    } catch (error) {
+      logger.error(
+        'MetadataSync',
+        `Errore durante la ricerca delle corrispondenze per "${series.title}"`,
+        error
+      )
+      throw error
+    }
+  }
+
+  public async parseAnimeWorldResults(
+    animeworldResults: FilterSearchResult[],
+    airDateInfo: SonarrAirDateInfo,
+    preferredLanguage: string
+  ) {
+    const dateStartWithMargin = DateTime.fromISO(airDateInfo.startDate!).minus({
+      months: 1,
+      days: 10,
+    })
+    const dateEndWithMargin = DateTime.fromISO(airDateInfo.endDate!).plus({ months: 1, days: 10 })
+
+    const matches: SeasonMatch[] = []
+
+    for (const awResult of animeworldResults) {
+      if (preferredLanguage === 'dub' && awResult.dub !== FilterDub.Dub) continue // Skip non-dubbed results if preference is dub
+      if (preferredLanguage === 'sub' && awResult.dub !== FilterDub.Sub) continue // Skip non-subbed results if preference is sub
+
+      if (preferredLanguage === 'dub_fallback_sub') {
+        // If preference is dub_fallback_sub, prioritize dubbed results
+        if (awResult.dub === FilterDub.Sub) {
+          const hasDubbedMatch = animeworldResults.find(
+            (r) => r.title === awResult.title && r.dub === FilterDub.Dub
+          )
+          if (hasDubbedMatch) {
+            continue // Skip subbed result if a dubbed version exists
+          }
+        }
+      }
+
+      if (!awResult.anilistId && !awResult.malId) continue // Skip if no AniList or MyAnimeList ID is available
+
+      let anilistResult: AniListMedia | null = null
+      if (awResult.anilistId) {
+        anilistResult = await this.anilistService.getMediaById(awResult.anilistId)
+      }
+
+      let myanimelistResult: MyAnimeListAnime | null = null
+      if (!anilistResult && awResult.malId) {
+        myanimelistResult = await this.myanimelistService.getMediaById(awResult.malId)
+      }
+
+      if (!anilistResult && !myanimelistResult) continue
+
+      if (anilistResult) {
+        if (!anilistResult.startDateUtc) continue // Skip if no start date
+        if (!anilistResult.airing && !anilistResult.endDateUtc) continue // Skip if not airing and not end date
+        if (anilistResult.aired && !anilistResult.endDateUtc) {
+          anilistResult.endDateUtc = anilistResult.startDateUtc
+        }
+
+        const anilistStartDate = DateTime.fromISO(anilistResult.startDateUtc)
+        const anilistEndDate = anilistResult.endDateUtc
+          ? DateTime.fromISO(anilistResult.endDateUtc)
+          : null
+        if (
+          anilistStartDate < dateStartWithMargin ||
+          (anilistEndDate && anilistEndDate > dateEndWithMargin)
+        ) {
+          continue // Skip if AniList dates are outside the air date range with margin
+        }
+      }
+
+      if (myanimelistResult) {
+        if (!myanimelistResult.startDateUtc) continue // Skip if no start or end date
+        if (!myanimelistResult.airing && !myanimelistResult.endDateUtc) continue // Skip if not airing and not end date
+        if (myanimelistResult.aired && !myanimelistResult.endDateUtc) {
+          myanimelistResult.endDateUtc = myanimelistResult.startDateUtc
+        }
+
+        const myanimelistStartDate = DateTime.fromISO(myanimelistResult.startDateUtc)
+        const myanimelistEndDate = myanimelistResult.endDateUtc
+          ? DateTime.fromISO(myanimelistResult.endDateUtc)
+          : null
+        if (
+          myanimelistStartDate < dateStartWithMargin ||
+          (myanimelistEndDate && myanimelistEndDate > dateEndWithMargin)
+        ) {
+          continue // Skip if MyAnimeList dates are outside the air date range with margin
+        }
+      }
+
+      matches.push({
+        animeworldTitle: awResult.title,
+        animeworldIdentifier: awResult.identifier,
+        anilistId: anilistResult?.id,
+        anilistTitle: anilistResult?.title.romaji || anilistResult?.title.english || '',
+        anilistStartDate: anilistResult?.startDateUtc,
+        malId: myanimelistResult?.id,
+        malTitle: myanimelistResult?.title || '',
+        malStartDate: myanimelistResult?.startDateUtc,
+        sonarrStartDate: airDateInfo.startDate,
+        sonarrEndDate: airDateInfo.endDate,
+      })
+    }
+    return matches
   }
 }

@@ -7,11 +7,12 @@ Applicazione full-stack per la gestione automatica dei download di anime da Anim
 ### 📺 Gestione Serie e Stagioni
 - **Sincronizzazione automatica** con Sonarr per importare serie anime monitorate
 - **Ricerca automatica** degli anime su AnimeWorld con matching intelligente dei titoli
+- **Match serie**: utilizza le API di [AniList](https://anilist.co/) e [Jikan (MyAnimeList)](https://jikan.moe/) per identificare correttamente le serie anime
 - **Supporto multi-parte**: gestione automatica di anime con più parti (es: "One Piece Part 2")
 - **Numerazione assoluta**: supporto per serie con numerazione continua attraverso le stagioni
 - **Filtro lingua**: preferenza per versioni doppiate o sottotitolate con fallback automatico
 
-### 🔄 Task Automatici Configurabili
+### 🔄 Task Automatici Configurabili 
 L'applicazione esegue automaticamente diversi task periodici:
 
 - **Sincronizzazione Metadati**: aggiorna informazioni di serie, stagioni ed episodi da Sonarr
