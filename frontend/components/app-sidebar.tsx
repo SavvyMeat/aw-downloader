@@ -9,6 +9,10 @@ import {
   Settings,
   Download,
   Clock,
+  ChevronRight,
+  Settings2,
+  Server,
+  Tv,
 } from "lucide-react";
 
 import {
@@ -19,8 +23,24 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarRail,
+  useSidebar,
 } from "@/components/ui/sidebar";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 import { fetchAppVersion } from "@/lib/api";
 
 const menuItems = [
@@ -39,22 +59,40 @@ const menuItems = [
     url: "/tasks",
     icon: Clock,
   },
+];
+
+const settingsItems = [
   {
-    title: "Impostazioni",
-    url: "/settings",
-    icon: Settings,
+    title: "Generale",
+    url: "/settings/",
+    icon: Settings2,
+  },
+  {
+    title: "Sonarr",
+    url: "/settings/sonarr",
+    icon: Tv,
   },
 ];
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname();
+  const { state } = useSidebar();
   const [version, setVersion] = React.useState<string>("dev");
+  const isSettingsActive = pathname.startsWith("/settings");
+  const [isSettingsOpen, setIsSettingsOpen] = React.useState(isSettingsActive);
+  const isSidebarCollapsed = state === "collapsed";
 
   React.useEffect(() => {
     fetchAppVersion()
       .then((data) => setVersion(data.version))
       .catch(() => setVersion("dev"));
   }, []);
+
+  React.useEffect(() => {
+    if (isSettingsActive) {
+      setIsSettingsOpen(true);
+    }
+  }, [isSettingsActive]);
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -81,20 +119,104 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarHeader>
       <SidebarContent>
         <SidebarMenu>
-          {menuItems.map((item) => (
-            <SidebarMenuItem key={item.title} className="px-2">
-              <SidebarMenuButton
-                asChild
-                isActive={pathname === item.url}
-                tooltip={item.title}
-              >
-                <Link href={item.url}>
-                  <item.icon />
-                  <span>{item.title}</span>
-                </Link>
-              </SidebarMenuButton>
+          {menuItems.map((item) => {
+            // Match exact path or paths that start with item.url + "/"
+            const isActive = pathname === item.url || 
+              (item.url !== "/" && pathname.startsWith(item.url + "/"));
+            return (
+              <SidebarMenuItem key={item.title} className="px-2">
+                <SidebarMenuButton
+                  asChild
+                  isActive={isActive}
+                  tooltip={item.title}
+                >
+                  <Link href={item.url}>
+                    <item.icon />
+                    <span>{item.title}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            );
+          })}
+          
+          {/* Settings Menu - Dropdown when collapsed, Collapsible when expanded */}
+          {isSidebarCollapsed ? (
+            <SidebarMenuItem className="px-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <SidebarMenuButton
+                    tooltip="Impostazioni"
+                    isActive={isSettingsActive}
+                  >
+                    <Settings />
+                    <span>Impostazioni</span>
+                  </SidebarMenuButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="right" align="start" className="w-48">
+                  {settingsItems.map((item) => {
+                    const isActive = item.url === "/settings"
+                      ? pathname === "/settings"
+                      : (pathname === item.url || pathname.startsWith(item.url + "/"));
+                    return (
+                      <DropdownMenuItem key={item.title} asChild>
+                        <Link 
+                          href={item.url} 
+                          className={cn(
+                            "flex items-center gap-2",
+                            isActive && "bg-accent font-medium"
+                          )}
+                        >
+                          <item.icon className="h-4 w-4" />
+                          <span>{item.title}</span>
+                        </Link>
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </SidebarMenuItem>
-          ))}
+          ) : (
+            <Collapsible
+              open={isSettingsOpen}
+              onOpenChange={setIsSettingsOpen}
+              className="group/collapsible"
+            >
+              <SidebarMenuItem className="px-2">
+                <CollapsibleTrigger asChild>
+                  <SidebarMenuButton
+                    tooltip="Impostazioni"
+                    isActive={isSettingsActive}
+                  >
+                    <Settings />
+                    <span>Impostazioni</span>
+                    <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+                  </SidebarMenuButton>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <SidebarMenuSub>
+                    {settingsItems.map((item) => {
+                      const isActive = item.url === "/settings"
+                        ? pathname === "/settings"
+                        : (pathname === item.url || pathname.startsWith(item.url + "/"));
+                      return (
+                        <SidebarMenuSubItem key={item.title}>
+                          <SidebarMenuSubButton
+                            asChild
+                            isActive={isActive}
+                          >
+                            <Link href={item.url}>
+                              <item.icon />
+                              <span>{item.title}</span>
+                            </Link>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      );
+                    })}
+                  </SidebarMenuSub>
+                </CollapsibleContent>
+              </SidebarMenuItem>
+            </Collapsible>
+          )}
         </SidebarMenu>
       </SidebarContent>
       <SidebarFooter>
