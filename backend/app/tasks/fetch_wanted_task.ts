@@ -13,6 +13,7 @@ export class FetchWantedTask extends BaseTask {
   name = 'Recupero Lista Wanted'
   description = 'Recupera la lista degli episodi mancanti da Sonarr'
   defaultIntervalMinutes = 30 // 30 minuti
+  serviceType: 'sonarr' | 'radarr' | 'general' = 'sonarr'
 
   private wantedEpisodes: SonarrWantedRecord[] = []
   private animeworldService: AnimeworldService

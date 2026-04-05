@@ -3,13 +3,14 @@ import Series from '#models/series'
 import { logger } from '#services/logger_service'
 import { MetadataSyncService } from '#services/metadata_sync_service'
 import { getSonarrService } from '#services/sonarr_service'
-import { BaseTask } from './base_task.js'
+import { BaseTask, ServiceType } from './base_task.js'
 
 export class UpdateMetadataTask extends BaseTask {
   id = 'update_metadata'
   name = 'Aggiornamento Metadati Sonarr'
   description = 'Sincronizza i metadati delle serie tramite API Sonarr'
-  defaultIntervalMinutes = 120 // 2 ore
+  defaultIntervalMinutes = 720 // 12 ore
+  serviceType: ServiceType = 'sonarr'
   private metadataSyncService: MetadataSyncService
   private sonarrService = getSonarrService()
 

@@ -1,6 +1,8 @@
 import { DateTime } from 'luxon'
 import { logger } from '#services/logger_service'
 
+export type ServiceType = 'sonarr' | 'radarr' | 'general'
+
 export interface TaskStatus {
   lastRunAt: DateTime | null
   nextRunAt: DateTime | null
@@ -13,6 +15,7 @@ export abstract class BaseTask {
   abstract name: string
   abstract description: string
   abstract defaultIntervalMinutes: number
+  abstract serviceType: ServiceType
   
   intervalMinutes: number
 

@@ -120,7 +120,7 @@ export default function ListaPage() {
   };
 
   const handleSeriesClick = (seriesId: number) => {
-    router.push(`/list/details?id=${seriesId}`);
+    router.push(`/series/details?id=${seriesId}`);
   };
 
   const handleDeleteClick = (seriesId: number, e: React.MouseEvent) => {

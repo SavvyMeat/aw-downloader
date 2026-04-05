@@ -13,6 +13,7 @@ import {
   Settings2,
   Server,
   Tv,
+  Film,
 } from "lucide-react";
 
 import {
@@ -51,8 +52,13 @@ const menuItems = [
   },
   {
     title: "Lista Serie",
-    url: "/list",
+    url: "/series",
     icon: List,
+  },
+  {
+    title: "Film",
+    url: "/films",
+    icon: Film,
   },
   {
     title: "Tasks",

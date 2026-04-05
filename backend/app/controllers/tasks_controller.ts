@@ -4,10 +4,20 @@ import cronHelper from '../helpers/cron_helper.js'
 export default class TasksController {
   /**
    * Get all tasks
+   * Query params: serviceType ('sonarr' | 'radarr' | 'general')
    */
-  async index({ response }: HttpContext) {
+  async index({ request, response }: HttpContext) {
     try {
-      const tasks = cronHelper.getAllTasks()
+      const { serviceType } = request.qs()
+      
+      // Validate serviceType if provided
+      if (serviceType && !['sonarr', 'radarr', 'general'].includes(serviceType)) {
+        return response.badRequest({ 
+          message: 'Invalid serviceType. Must be: sonarr, radarr, or general' 
+        })
+      }
+      
+      const tasks = cronHelper.getAllTasks(serviceType)
       return response.ok(tasks)
     } catch (error) {
       return response.badRequest({ message: 'Error fetching tasks', error: error.message })

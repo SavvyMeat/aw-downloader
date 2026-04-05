@@ -137,7 +137,7 @@ function SeriesDetailContent() {
   if (error || !series || !seriesId) {
     return (
       <div className="p-6">
-        <Button variant="outline" onClick={() => router.push("/list")}>
+        <Button variant="outline" onClick={() => router.push("/series")}>
           <ArrowLeft className="h-4 w-4 mr-2" />
           Torna alla lista
         </Button>
@@ -164,7 +164,7 @@ function SeriesDetailContent() {
     <div className="w-full">
       {/* Header */}
       <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2">
-        <Button variant="outline" onClick={() => router.push("/list")} className="w-full sm:w-auto">
+        <Button variant="outline" onClick={() => router.push("/series")} className="w-full sm:w-auto">
           <ArrowLeft className="h-4 w-4 mr-2" />
           Torna alla lista
         </Button>

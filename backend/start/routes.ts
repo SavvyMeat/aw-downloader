@@ -10,6 +10,7 @@
 import router from '@adonisjs/core/services/router'
 
 const SeriesController = () => import('#controllers/series_controller')
+const FilmsController = () => import('#controllers/films_controller')
 const SeasonsController = () => import('#controllers/seasons_controller')
 const TasksController = () => import('#controllers/tasks_controller')
 const ConfigsController = () => import('#controllers/configs_controller')
@@ -32,6 +33,16 @@ router.group(() => {
     router.put('/:id', [SeriesController, 'update'])
     router.delete('/:id', [SeriesController, 'destroy'])
   }).prefix('/series')
+
+  // Films routes
+  router.group(() => {
+    router.get('/', [FilmsController, 'index'])
+    router.get('/:id', [FilmsController, 'show'])
+    router.get('/:id/poster', [FilmsController, 'getPoster'])
+    router.post('/', [FilmsController, 'store'])
+    router.put('/:id', [FilmsController, 'update'])
+    router.delete('/:id', [FilmsController, 'destroy'])
+  }).prefix('/films')
 
   // Seasons routes
   router.group(() => {

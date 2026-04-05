@@ -177,6 +177,116 @@ export async function updateSeries(
 }
 
 // ============================================
+// FILMS API
+// ============================================
+
+export interface Film {
+  id: number;
+  title: string;
+  description?: string;
+  status: string;
+  posterUrl?: string;
+  posterPath?: string;
+  deleted: boolean;
+  hasMissingAnimeWorldUrl?: boolean;
+  radarrId?: number;
+  alternateTitles?: string;
+  genres?: string;
+  year?: number;
+  studio?: string;
+  preferredLanguage?: string;
+  animeworldUrl?: string;
+}
+
+export interface FilmsListResponse {
+  data: Film[];
+  meta: PaginationMeta;
+}
+
+export interface FetchFilmsParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+  onlyMissingLinks?: boolean;
+}
+
+export async function fetchFilms(params: FetchFilmsParams = {}): Promise<FilmsListResponse> {
+  const { page = 1, limit = 10, search = "", sortBy = "title", sortOrder = "asc", onlyMissingLinks = false } = params;
+  
+  const queryParams = new URLSearchParams({
+    page: page.toString(),
+    limit: limit.toString(),
+    sortBy: sortBy,
+    sortOrder: sortOrder,
+  });
+
+  if (search) {
+    queryParams.append('search', search);
+  }
+
+  if (onlyMissingLinks) {
+    queryParams.append('onlyMissingLinks', 'true');
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/films?${queryParams}`);
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Failed to fetch films");
+  }
+  
+  return response.json();
+}
+
+/**
+ * Get poster URL for a film
+ */
+export function getFilmPosterUrl(filmId: number): string {
+  return `${API_BASE_URL}/api/films/${filmId}/poster`;
+}
+
+export async function fetchFilmById(id: number): Promise<Film> {
+  const response = await fetch(`${API_BASE_URL}/api/films/${id}`);
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Film not found");
+  }
+  
+  return response.json();
+}
+
+export async function deleteFilm(id: number): Promise<{ message: string }> {
+  const response = await fetch(`${API_BASE_URL}/api/films/${id}`, {
+    method: "DELETE",
+  });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Failed to delete film");
+  }
+  
+  return response.json();
+}
+
+export async function updateFilm(id: number, data: Partial<Film>): Promise<Film> {
+  const response = await fetch(`${API_BASE_URL}/api/films/${id}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Failed to update film");
+  }
+  
+  return response.json();
+}
+
+// ============================================
 // SEASONS API
 // ============================================
 
@@ -208,18 +318,28 @@ export async function updateSeasonDownloadUrls(
 // TASKS API
 // ============================================
 
+export type ServiceType = 'sonarr' | 'radarr' | 'general';
+
 export interface Task {
   id: string;
   name: string;
   description: string;
-  cron: string;
+  intervalMinutes: number;
+  cronExpression: string;
+  serviceType: ServiceType;
+  status: 'idle' | 'running' | 'success' | 'error';
   lastRunAt: string | null;
-  nextRunAt: string;
-  running: boolean;
+  nextRunAt: string | null;
+  lastError: string | null;
 }
 
-export async function fetchTasks(): Promise<Task[]> {
-  const response = await fetch(`${API_BASE_URL}/api/tasks`);
+export async function fetchTasks(serviceType?: ServiceType): Promise<Task[]> {
+  const url = new URL(`${API_BASE_URL}/api/tasks`);
+  if (serviceType) {
+    url.searchParams.append('serviceType', serviceType);
+  }
+  
+  const response = await fetch(url.toString());
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw new Error(error.message || "Failed to fetch tasks");

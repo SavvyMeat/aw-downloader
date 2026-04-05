@@ -1,6 +1,6 @@
 import cron from 'node-cron'
 import Config from '#models/config'
-import { BaseTask, UpdateMetadataTask, FetchWantedTask } from '../tasks/index.js'
+import { BaseTask, UpdateMetadataTask, FetchWantedTask, ServiceType } from '../tasks/index.js'
 import { DateTime } from 'luxon'
 
 interface TaskInstance {
@@ -28,8 +28,8 @@ class CronHelper {
     let wantedInterval = 30
 
     try {
-      metadataInterval = parseInt(await Config.get('updatemetadata_interval') || '120')
-      wantedInterval = parseInt(await Config.get('fetchwanted_interval') || '30')
+      metadataInterval = parseInt(await Config.get('sonarr_updatemetadata_interval') || '120')
+      wantedInterval = parseInt(await Config.get('sonarr_fetchwanted_interval') || '30')
     } catch (error) {
       // Config table might not exist yet (during migrations)
       console.log('Using default task intervals (config not available)')
@@ -127,7 +127,7 @@ class CronHelper {
     taskInstance.cronExpression = this.minutesToCron(intervalMinutes)
 
     // Save to config
-    const configKey = `${taskId.replace('_', '')}_interval`
+    const configKey = `${taskInstance.task.serviceType}_${taskId.replace('_', '')}_interval`
     await Config.set(configKey, intervalMinutes.toString())
 
     // Reschedule
@@ -139,13 +139,21 @@ class CronHelper {
   /**
    * Get all tasks with their status
    */
-  getAllTasks() {
-    return Array.from(this.tasks.values()).map(taskInstance => ({
+  getAllTasks(serviceType?: ServiceType) {
+    let tasks = Array.from(this.tasks.values())
+    
+    // Filter by service type if specified
+    if (serviceType) {
+      tasks = tasks.filter(taskInstance => taskInstance.task.serviceType === serviceType)
+    }
+    
+    return tasks.map(taskInstance => ({
       id: taskInstance.id,
       name: taskInstance.name,
       description: taskInstance.description,
       intervalMinutes: taskInstance.intervalMinutes,
       cronExpression: taskInstance.cronExpression,
+      serviceType: taskInstance.task.serviceType,
       status: taskInstance.task.status,
       lastRunAt: taskInstance.task.lastRunAt?.toISO() || null,
       nextRunAt: taskInstance.task.nextRunAt?.toISO() || null,
@@ -166,6 +174,7 @@ class CronHelper {
       description: taskInstance.description,
       intervalMinutes: taskInstance.intervalMinutes,
       cronExpression: taskInstance.cronExpression,
+      serviceType: taskInstance.task.serviceType,
       status: taskInstance.task.status,
       lastRunAt: taskInstance.task.lastRunAt?.toISO() || null,
       nextRunAt: taskInstance.task.nextRunAt?.toISO() || null,
