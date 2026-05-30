@@ -129,9 +129,9 @@ export function SeasonCard({
         // Rimuove eventuali protocolli e domini rimasti
         identifier = identifier.replace(/^https?:\/\/[^/]+\/?/, '');
         
-        // Estrae solo la parte che finisce con .xxxxx (punto + 5 caratteri alfanumerici)
+        // Estrae solo la parte che finisce con .xxxxx (punto + n caratteri alfanumerici)
         // e rimuove tutto quello che viene dopo (es: /episodio-1)
-        const match = identifier.match(/^([^/]+\.[a-zA-Z0-9]{5})/);
+        const match = identifier.match(/^([^/]+\.[^/]+)/);
         if (match) {
             identifier = match[1];
         } else {
