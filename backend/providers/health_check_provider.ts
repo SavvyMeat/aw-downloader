@@ -43,7 +43,8 @@ export default class HealthCheckProvider {
     try {
       await SonarrService.performHealthCheck()
     } catch (error) {
-      logger.error('HealthCheckProvider', 'Initial health check failed', error.message)
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      logger.error('HealthCheckProvider', 'Initial health check failed', errorMessage)
     }
 
   }

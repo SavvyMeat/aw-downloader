@@ -386,6 +386,9 @@ export class AnimeworldService {
 
   /**
    * Get download link for a specific episode
+   * Tries multiple strategies:
+   * 1. Download button with direct link (#download center a[download])
+   * 2. API call to /api/episode/info?id=<episodeCode> using the "grabber" property
    * @param episodeUrl - The URL of the episode page
    * @returns The download URL
    */
@@ -401,11 +404,31 @@ export class AnimeworldService {
 
       const $ = cheerio.load(response.body)
 
-      // Find download link with selector '#download center a[download]'
+      // Strategy 1: download button with direct link
       const downloadLink = $('#download center a[download]').attr('href')
-
       if (downloadLink) {
         return downloadLink
+      }
+
+      // Strategy 2: call /api/episode/info?id=<episodeCode> and use the "grabber" property
+      const episodeCode = episodeUrl.split('/').pop()
+      if (episodeCode) {
+        try {
+          const baseUrl = new URL(episodeUrl).origin
+          const apiUrl = `${baseUrl}/api/episode/info?id=${episodeCode}`
+          const apiResponse = await this.gotInstance.get(apiUrl, {
+            headers: {
+              Accept: 'application/json, text/plain, */*',
+              Referer: episodeUrl,
+            },
+          })
+          const apiData = JSON.parse(apiResponse.body) as { grabber?: string }
+          if (apiData.grabber) {
+            return apiData.grabber
+          }
+        } catch (apiError) {
+          console.error('Animeworld api error: ', apiError instanceof Error ? apiError.message : apiError)
+        }
       }
 
       logger.warning('AnimeWorld', 'Link per il download non disponibile')

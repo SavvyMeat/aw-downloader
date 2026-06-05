@@ -125,6 +125,9 @@ export class DownloadEpisodesTask {
       // Copy file to Sonarr folder and trigger rescan
       await this.copyToSonarrAndRescan(params, outputPath)
 
+      // Clean up merged temp file
+      await fs.rm(outputPath, { force: true }).catch(() => {})
+
       await this.renameEpisodeFile(params)  
       
       // Mark as completed
