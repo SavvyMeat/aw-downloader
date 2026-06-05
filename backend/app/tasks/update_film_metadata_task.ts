@@ -21,6 +21,12 @@ export class UpdateFilmMetadataTask extends BaseTask {
   }
 
   async execute(): Promise<void> {
+    const enabled = (await Config.get<boolean>('radarr_enabled')) ?? false
+    if (!enabled) {
+      logger.debug('UpdateFilmMetadata', 'Radarr disabilitato, task saltato')
+      return
+    }
+
     await this.radarrService.initialize()
 
     // Tag filtering configuration

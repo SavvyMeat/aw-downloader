@@ -25,6 +25,12 @@ export class FetchWantedFilmsTask extends BaseTask {
   }
 
   async execute(): Promise<void> {
+    const enabled = (await Config.get<boolean>('radarr_enabled')) ?? false
+    if (!enabled) {
+      logger.debug('FetchWantedFilms', 'Radarr disabilitato, task saltato')
+      return
+    }
+
     await this.radarrService.initialize()
 
     // Tag filtering configuration (same logic as Sonarr, no anime/standard type for movies)

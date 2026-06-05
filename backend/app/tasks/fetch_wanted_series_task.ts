@@ -26,6 +26,12 @@ export class FetchWantedSeriesTask extends BaseTask {
   }
 
   async execute(): Promise<void> {
+    const enabled = (await Config.get<boolean>('sonarr_enabled')) ?? true
+    if (!enabled) {
+      logger.debug('FetchWantedSeries', 'Sonarr disabilitato, task saltato')
+      return
+    }
+
     // Initialize Sonarr service
     await this.sonarrService.initialize()
 

@@ -62,6 +62,7 @@ interface Task {
 }
 
 interface Configs {
+  radarr_enabled?: boolean;
   radarr_url?: string;
   radarr_token?: string;
   radarr_auto_rename?: boolean;
@@ -70,6 +71,7 @@ interface Configs {
 }
 
 interface ConfigInputs {
+  radarr_enabled: boolean;
   radarr_url: string;
   radarr_token: string;
   radarr_auto_rename: boolean;
@@ -83,6 +85,7 @@ export default function RadarrSettingsPage() {
   const [radarrTags, setRadarrTags] = useState<Array<{ value: string; label: string }>>([]);
   const [configs, setConfigs] = useState<Configs>({});
   const [configInputs, setConfigInputs] = useState<ConfigInputs>({
+    radarr_enabled: false,
     radarr_url: "",
     radarr_token: "",
     radarr_auto_rename: false,
@@ -169,6 +172,7 @@ export default function RadarrSettingsPage() {
       }
 
       setConfigInputs({
+        radarr_enabled: typeof data.radarr_enabled === "boolean" ? data.radarr_enabled : data.radarr_enabled === "true",
         radarr_url: data.radarr_url || "",
         radarr_token: "",
         radarr_auto_rename: typeof data.radarr_auto_rename === "boolean" ? data.radarr_auto_rename : data.radarr_auto_rename === "true",
@@ -237,6 +241,17 @@ export default function RadarrSettingsPage() {
 
   const handleConfigChange = (key: keyof Configs, value: string) => {
     setConfigInputs((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleEnabledToggle = async (checked: boolean) => {
+    setConfigInputs((prev) => ({ ...prev, radarr_enabled: checked }));
+    try {
+      await apiUpdateConfig("radarr_enabled", checked);
+      toast.success(checked ? "Integrazione Radarr attivata" : "Integrazione Radarr disattivata");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Errore salvataggio");
+      setConfigInputs((prev) => ({ ...prev, radarr_enabled: !checked }));
+    }
   };
 
   const handleAutoRenameToggle = async (checked: boolean) => {
@@ -330,6 +345,28 @@ export default function RadarrSettingsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Enable/Disable toggle */}
+      <Card>
+        <CardContent className="py-0">
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <Label htmlFor="radarr-enabled" className="text-base font-semibold cursor-pointer">
+                Abilita integrazione Radarr
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Attiva la sincronizzazione automatica dei film tramite Radarr
+              </p>
+            </div>
+            <Switch
+              id="radarr-enabled"
+              checked={configInputs.radarr_enabled}
+              onCheckedChange={handleEnabledToggle}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {configInputs.radarr_enabled && <>
       {/* Radarr Health Status */}
       <RadarrStatusBadge />
 
@@ -671,6 +708,7 @@ export default function RadarrSettingsPage() {
           )}
         </CardContent>
       </Card>
+      </>}
     </div>
   );
 }

@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import { Clock, PlayCircle, CheckCircle, XCircle, Loader2, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { fetchTasks as apiFetchTasks, executeTask as apiExecuteTask } from "@/lib/api";
+import { fetchTasks as apiFetchTasks, executeTask as apiExecuteTask, fetchConfigs } from "@/lib/api";
 
 interface Task {
   id: string;
   name: string;
   description: string;
+  serviceType: "sonarr" | "radarr" | "general";
   intervalMinutes: number;
   cronExpression: string;
   lastRunAt: string | null;
@@ -22,10 +23,18 @@ export default function TasksPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [executing, setExecuting] = useState<string | null>(null);
+  const [sonarrEnabled, setSonarrEnabled] = useState(true);
+  const [radarrEnabled, setRadarrEnabled] = useState(false);
 
   useEffect(() => {
+    fetchConfigs().then((configs) => {
+      const se = configs.sonarr_enabled;
+      setSonarrEnabled(typeof se === 'boolean' ? se : se !== 'false');
+      const re = configs.radarr_enabled;
+      setRadarrEnabled(typeof re === 'boolean' ? re : re === 'true');
+    }).catch(() => {});
     fetchTasksList();
-    const interval = setInterval(fetchTasksList, 5000); // Refresh ogni 5 secondi
+    const interval = setInterval(fetchTasksList, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -183,25 +192,32 @@ export default function TasksPage() {
                 </div>
                 <div className="flex items-center gap-2 w-full sm:w-auto">
                   {getStatusBadge(task.status)}
-                  <Button
-                    onClick={() => handleExecuteNow(task.id)}
-                    disabled={task.status === "running" || executing === task.id}
-                    size="sm"
-                    variant="outline"
-                    className="flex-1 sm:flex-initial"
-                  >
-                    {executing === task.id ? (
-                      <>
-                        <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                        Avvio...
-                      </>
-                    ) : (
-                      <>
-                        <Play className="mr-2 h-3 w-3" />
-                        Esegui Ora
-                      </>
-                    )}
-                  </Button>
+                  {(task.serviceType === "sonarr" && !sonarrEnabled) ||
+                   (task.serviceType === "radarr" && !radarrEnabled) ? (
+                    <span className="px-2 py-1 text-xs font-medium rounded-full bg-muted text-muted-foreground flex-1 sm:flex-initial text-center">
+                      Disabilitato
+                    </span>
+                  ) : (
+                    <Button
+                      onClick={() => handleExecuteNow(task.id)}
+                      disabled={task.status === "running" || executing === task.id}
+                      size="sm"
+                      variant="outline"
+                      className="flex-1 sm:flex-initial"
+                    >
+                      {executing === task.id ? (
+                        <>
+                          <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                          Avvio...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="mr-2 h-3 w-3" />
+                          Esegui Ora
+                        </>
+                      )}
+                    </Button>
+                  )}
                 </div>
               </div>
 

@@ -69,6 +69,7 @@ interface Task {
 }
 
 interface Configs {
+  sonarr_enabled?: boolean;
   sonarr_url?: string;
   sonarr_token?: string;
   sonarr_filter_anime_only?: boolean;
@@ -78,6 +79,7 @@ interface Configs {
 }
 
 interface ConfigInputs {
+  sonarr_enabled: boolean;
   sonarr_url: string;
   sonarr_token: string;
   sonarr_filter_anime_only: boolean;
@@ -92,6 +94,7 @@ export default function SonarrSettingsPage() {
   const [sonarrTags, setSonarrTags] = useState<Array<{ value: string; label: string }>>([]);
   const [configs, setConfigs] = useState<Configs>({});
   const [configInputs, setConfigInputs] = useState<ConfigInputs>({
+    sonarr_enabled: true,
     sonarr_url: "",
     sonarr_token: "",
     sonarr_filter_anime_only: true,
@@ -198,6 +201,7 @@ export default function SonarrSettingsPage() {
       }
 
       setConfigInputs({
+        sonarr_enabled: typeof data.sonarr_enabled === 'boolean' ? data.sonarr_enabled : data.sonarr_enabled !== 'false',
         sonarr_url: data.sonarr_url || "",
         sonarr_token: "",
         sonarr_filter_anime_only: typeof data.sonarr_filter_anime_only === 'boolean' ? data.sonarr_filter_anime_only : data.sonarr_filter_anime_only !== 'false',
@@ -267,6 +271,17 @@ export default function SonarrSettingsPage() {
 
   const handleConfigChange = (key: keyof Configs, value: string) => {
     setConfigInputs((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleEnabledToggle = async (checked: boolean) => {
+    setConfigInputs((prev) => ({ ...prev, sonarr_enabled: checked }));
+    try {
+      await apiUpdateConfig("sonarr_enabled", checked);
+      toast.success(checked ? "Integrazione Sonarr attivata" : "Integrazione Sonarr disattivata");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Errore salvataggio");
+      setConfigInputs((prev) => ({ ...prev, sonarr_enabled: !checked }));
+    }
   };
 
   const handleFilterAnimeOnlyToggle = async (checked: boolean) => {
@@ -378,6 +393,28 @@ export default function SonarrSettingsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Enable/Disable toggle */}
+      <Card>
+        <CardContent className="py-0">
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <Label htmlFor="sonarr-enabled" className="text-base font-semibold cursor-pointer">
+                Abilita integrazione Sonarr
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Attiva la sincronizzazione automatica delle serie TV tramite Sonarr
+              </p>
+            </div>
+            <Switch
+              id="sonarr-enabled"
+              checked={configInputs.sonarr_enabled}
+              onCheckedChange={handleEnabledToggle}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {configInputs.sonarr_enabled && <>
       {/* Sonarr Health Status */}
       <SonarrStatusBadge />
 
@@ -733,6 +770,7 @@ export default function SonarrSettingsPage() {
           ))}
         </CardContent>
       </Card>
+      </>}
     </div>
   );
 }
