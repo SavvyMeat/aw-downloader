@@ -1,4 +1,6 @@
 export { BaseTask, type ServiceType } from './base_task.js'
-export { UpdateMetadataTask } from './update_metadata_task.js'
-export { FetchWantedTask } from './fetch_wanted_task.js'
+export { UpdateSeriesMetadataTask } from './update_series_metadata_task.js'
+export { FetchWantedSeriesTask } from './fetch_wanted_series_task.js'
+export { UpdateFilmMetadataTask } from './update_film_metadata_task.js'
+export { FetchWantedFilmsTask } from './fetch_wanted_films_task.js'
 export { DownloadEpisodesTask } from './download_episodes_task.js'

@@ -269,6 +269,19 @@ export async function deleteFilm(id: number): Promise<{ message: string }> {
   return response.json();
 }
 
+export async function syncFilmMetadata(id: number): Promise<{ message: string; filmId: number }> {
+  const response = await fetch(`${API_BASE_URL}/api/films/${id}/sync-metadata`, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Failed to sync film metadata");
+  }
+
+  return response.json();
+}
+
 export async function updateFilm(id: number, data: Partial<Film>): Promise<Film> {
   const response = await fetch(`${API_BASE_URL}/api/films/${id}`, {
     method: "PUT",
@@ -417,8 +430,20 @@ export async function updateConfig(key: string, value: any): Promise<{ key: stri
 // DOWNLOAD QUEUE API
 // ============================================
 
-export interface QueueItem {
+interface BaseQueueItem {
   id: string;
+  status: "pending" | "downloading" | "completed" | "failed";
+  progress: number;
+  downloadSpeed?: number; // bytes per second
+  totalSize?: number; // bytes
+  addedAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  error?: string;
+}
+
+export interface EpisodeQueueItem extends BaseQueueItem {
+  mediaType: "episode";
   seriesId: number;
   seasonId: number;
   episodeId: number;
@@ -426,14 +451,17 @@ export interface QueueItem {
   seasonNumber: number;
   episodeNumber: number;
   episodeTitle: string;
-  status: "pending" | "downloading" | "completed" | "failed";
-  progress: number;
-  downloadSpeed?: number; // bytes per second
-  addedAt: string;
-  startedAt?: string;
-  completedAt?: string;
-  error?: string;
 }
+
+export interface FilmQueueItem extends BaseQueueItem {
+  mediaType: "film";
+  filmId: number;
+  radarrId: number;
+  filmTitle: string;
+  year: number | null;
+}
+
+export type QueueItem = EpisodeQueueItem | FilmQueueItem;
 
 export interface QueueConfig {
   maxWorkers: number;
@@ -624,9 +652,12 @@ export async function clearLogs(): Promise<{ message: string }> {
 // ROOT FOLDERS API
 // ============================================
 
+export type ArrService = "sonarr" | "radarr";
+
 export interface RootFolder {
   id: number;
-  sonarrId: number;
+  serviceId: number;
+  service: ArrService;
   path: string;
   mappedPath: string | null;
   accessible: boolean;
@@ -643,27 +674,29 @@ export interface SyncRootFoldersResponse {
   rootFolders: RootFolder[];
 }
 
-export async function fetchRootFolders(): Promise<RootFolder[]> {
-  const response = await fetch(`${API_BASE_URL}/api/root-folders`);
-  
+export async function fetchRootFolders(service?: ArrService): Promise<RootFolder[]> {
+  const query = service ? `?service=${service}` : "";
+  const response = await fetch(`${API_BASE_URL}/api/root-folders${query}`);
+
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw new Error(error.message || "Failed to fetch root folders");
   }
-  
+
   return response.json();
 }
 
-export async function syncRootFolders(): Promise<SyncRootFoldersResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/root-folders/sync`, {
+export async function syncRootFolders(service?: ArrService): Promise<SyncRootFoldersResponse> {
+  const query = service ? `?service=${service}` : "";
+  const response = await fetch(`${API_BASE_URL}/api/root-folders/sync${query}`, {
     method: "POST",
   });
-  
+
   if (!response.ok) {
     const error = await response.json();
     throw new Error(error.message || "Failed to sync root folders");
   }
-  
+
   return response.json();
 }
 
@@ -820,6 +853,38 @@ export async function getSonarrStatus(): Promise<SonarrHealthStatus> {
   return response.json();
 }
 
+// Radarr shares the same health-status shape as Sonarr
+export type RadarrHealthStatus = SonarrHealthStatus;
+
+export async function checkRadarrHealth(): Promise<RadarrHealthStatus> {
+  const response = await fetch(`${API_BASE_URL}/api/health/radarr`);
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Failed to check Radarr health");
+  }
+  return response.json();
+}
+
+export async function forceRadarrHealthCheck(): Promise<RadarrHealthStatus> {
+  const response = await fetch(`${API_BASE_URL}/api/health/radarr/force`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Failed to force Radarr health check");
+  }
+  return response.json();
+}
+
+export async function getRadarrStatus(): Promise<RadarrHealthStatus> {
+  const response = await fetch(`${API_BASE_URL}/api/health/radarr/status`);
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Failed to get Radarr status");
+  }
+  return response.json();
+}
+
 export interface AppVersion {
   version: string;
 }
@@ -847,6 +912,21 @@ export async function fetchSonarrTags(): Promise<SonarrTag[]> {
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw new Error(error.message || "Failed to fetch Sonarr tags");
+  }
+  return response.json();
+}
+
+// ============================================
+// RADARR TAGS API
+// ============================================
+
+export type RadarrTag = SonarrTag;
+
+export async function fetchRadarrTags(): Promise<RadarrTag[]> {
+  const response = await fetch(`${API_BASE_URL}/api/radarr/tags`);
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Failed to fetch Radarr tags");
   }
   return response.json();
 }

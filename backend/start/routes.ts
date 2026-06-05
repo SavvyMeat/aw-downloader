@@ -20,6 +20,7 @@ const RootFoldersController = () => import('#controllers/root_folders_controller
 const NotificationsController = () => import('#controllers/notifications_controller')
 const HealthController = () => import('#controllers/health_controller')
 const SonarrController = () => import('#controllers/sonarr_controller')
+const RadarrController = () => import('#controllers/radarr_controller')
 
 router.group(() => {
 
@@ -40,6 +41,7 @@ router.group(() => {
     router.get('/:id', [FilmsController, 'show'])
     router.get('/:id/poster', [FilmsController, 'getPoster'])
     router.post('/', [FilmsController, 'store'])
+    router.post('/:id/sync-metadata', [FilmsController, 'syncMetadata'])
     router.put('/:id', [FilmsController, 'update'])
     router.delete('/:id', [FilmsController, 'destroy'])
   }).prefix('/films')
@@ -109,6 +111,9 @@ router.group(() => {
     router.get('/sonarr', [HealthController, 'checkSonarr'])
     router.post('/sonarr/force', [HealthController, 'forceSonarrCheck'])
     router.get('/sonarr/status', [HealthController, 'getSonarrStatus'])
+    router.get('/radarr', [HealthController, 'checkRadarr'])
+    router.post('/radarr/force', [HealthController, 'forceRadarrCheck'])
+    router.get('/radarr/status', [HealthController, 'getRadarrStatus'])
     router.get('/version', [HealthController, 'getVersion'])
   }).prefix('/health')
 
@@ -116,5 +121,10 @@ router.group(() => {
   router.group(() => {
     router.get('/tags', [SonarrController, 'getTags'])
   }).prefix('/sonarr')
+
+  // Radarr routes
+  router.group(() => {
+    router.get('/tags', [RadarrController, 'getTags'])
+  }).prefix('/radarr')
 
 }).prefix('/api')

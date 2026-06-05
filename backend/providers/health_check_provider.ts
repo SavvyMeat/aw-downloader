@@ -1,6 +1,7 @@
 import type { ApplicationService } from '@adonisjs/core/types'
 import cron from 'node-cron'
 import { SonarrService } from '#services/sonarr_service'
+import { RadarrService } from '#services/radarr_service'
 import { logger } from '#services/logger_service'
 
 export default class HealthCheckProvider {
@@ -30,10 +31,13 @@ export default class HealthCheckProvider {
     if (this.app.getEnvironment() !== 'web') {
       return;
     }
-    // Start cron job to check Sonarr health every minute
+    // Start cron job to check Sonarr/Radarr health every minute
     this.cronJob = cron.schedule('* * * * *', async () => {
       try {
-        await SonarrService.performHealthCheck()
+        await Promise.all([
+          SonarrService.performHealthCheck(),
+          RadarrService.performHealthCheck(),
+        ])
       } catch (error) {
         logger.error('HealthCheckProvider', 'Failed to perform health check', error)
       }
@@ -41,7 +45,10 @@ export default class HealthCheckProvider {
 
     // Perform initial health check
     try {
-      await SonarrService.performHealthCheck()
+      await Promise.all([
+        SonarrService.performHealthCheck(),
+        RadarrService.performHealthCheck(),
+      ])
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       logger.error('HealthCheckProvider', 'Initial health check failed', errorMessage)

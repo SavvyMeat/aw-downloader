@@ -5,15 +5,16 @@ import { getDownloadQueue } from '#services/download_queue'
 import { AnimeworldService } from '#services/animeworld_service'
 import { logger } from '#services/logger_service'
 import { getSonarrService, type SonarrWantedRecord } from '#services/sonarr_service'
-import { MetadataSyncService } from '#services/metadata_sync_service'
+import { SeriesMetadataSyncService } from '#services/series_metadata_sync_service'
 import Series from '#models/series'
 
-export class FetchWantedTask extends BaseTask {
+export class FetchWantedSeriesTask extends BaseTask {
   id = 'fetch_wanted'
   name = 'Recupero Lista Wanted'
   description = 'Recupera la lista degli episodi mancanti da Sonarr'
   defaultIntervalMinutes = 30 // 30 minuti
   serviceType: 'sonarr' | 'radarr' | 'general' = 'sonarr'
+  intervalConfigKey = 'sonarr_fetchwanted_interval'
 
   private wantedEpisodes: SonarrWantedRecord[] = []
   private animeworldService: AnimeworldService
@@ -97,7 +98,7 @@ export class FetchWantedTask extends BaseTask {
     const existingIds = existingSeries.map((s) => (s as { id: number }).id);
     const missingSeriesIds = uniqueSeriesIds.filter(id => !existingIds.includes(id))
 
-    const metadataSyncService = new MetadataSyncService()
+    const metadataSyncService = new SeriesMetadataSyncService()
 
     // Sync only missing series
     for (const sonarrId of missingSeriesIds) {
@@ -138,6 +139,7 @@ export class FetchWantedTask extends BaseTask {
         const existingItems = queue.getAllItems()
         const alreadyInQueue = existingItems.some(
           (item) =>
+            item.mediaType === 'episode' &&
             item.episodeId === wantedEp.id &&
             (item.status === 'pending' || item.status === 'downloading')
         )
@@ -160,6 +162,7 @@ export class FetchWantedTask extends BaseTask {
 
         // Add to queue
         queue.addToQueue({
+          mediaType: 'episode',
           seriesId: series.id,
           seasonId: season.id,
           episodeId: wantedEp.id,

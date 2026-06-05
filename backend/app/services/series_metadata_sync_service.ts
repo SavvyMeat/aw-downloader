@@ -48,7 +48,7 @@ export interface AnimeSeason {
   titles: string[]
 }
 
-export class MetadataSyncService {
+export class SeriesMetadataSyncService {
   private sonarrService = getSonarrService()
   private animeworldService = new AnimeworldService()
   private anilistService = new AniListService()

@@ -1,5 +1,6 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import Film from '#models/film'
+import { FilmMetadataSyncService } from '#services/film_metadata_sync_service'
 import path from 'path'
 import fs from 'fs/promises'
 
@@ -136,6 +137,32 @@ export default class FilmsController {
       return response.ok({ message: 'Film deleted successfully' })
     } catch (error) {
       return response.badRequest({ message: 'Error deleting film', error: error.message })
+    }
+  }
+
+  /**
+   * Sync a film's metadata from Radarr (and re-resolve its AnimeWorld link)
+   */
+  async syncMetadata({ params, response }: HttpContext) {
+    try {
+      const film = await Film.findOrFail(params.id)
+
+      if (!film.radarrId) {
+        return response.badRequest({ message: 'Film does not have a Radarr ID' })
+      }
+
+      const filmMetadataSyncService = new FilmMetadataSyncService()
+      await filmMetadataSyncService.syncFilm(film.radarrId, true)
+
+      return response.ok({
+        message: 'Metadata synced successfully',
+        filmId: film.id,
+      })
+    } catch (error) {
+      return response.badRequest({
+        message: 'Error syncing metadata',
+        error: error.message,
+      })
     }
   }
 

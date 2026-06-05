@@ -29,7 +29,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Search, Loader2, ChevronLeft, ChevronRight, Film as FilmIcon, Trash2, Edit, ArrowUpDown, ArrowUp, ArrowDown, ExternalLink } from "lucide-react";
+import { Search, Loader2, ChevronLeft, ChevronRight, Film as FilmIcon, Trash2, Edit, ArrowUpDown, ArrowUp, ArrowDown, ExternalLink, RefreshCw } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,7 +40,24 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { fetchFilms, deleteFilm, updateFilm, type Film, type PaginationMeta } from "@/lib/api";
+import { fetchFilms, deleteFilm, updateFilm, syncFilmMetadata, fetchConfigs, type Film, type PaginationMeta } from "@/lib/api";
+
+const languageLabels: Record<string, string> = {
+  dub: "Doppiato",
+  sub: "Sottotitolato",
+  dub_fallback_sub: "Doppiato (fallback su sub)",
+};
+
+const languageBadge = (lang?: string): string => {
+  switch (lang) {
+    case "dub":
+      return "DUB";
+    case "dub_fallback_sub":
+      return "DUB/SUB";
+    default:
+      return "SUB";
+  }
+};
 import { debounce } from "lodash";
 import { toast } from "sonner";
 
@@ -65,6 +82,15 @@ export default function FilmsPage() {
     animeworldUrl: "",
   });
   const [saving, setSaving] = useState(false);
+  const [syncingId, setSyncingId] = useState<number | null>(null);
+  const [animeworldBaseUrl, setAnimeworldBaseUrl] = useState("https://www.animeworld.ac");
+
+  useEffect(() => {
+    fetchConfigs().then((configs) => {
+      const url = configs.animeworld_base_url || "https://www.animeworld.ac";
+      setAnimeworldBaseUrl(url.replace(/^\/+|\/+$/g, ''));
+    }).catch(() => {});
+  }, []);
   const [limit, setLimit] = useState<number>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('filmsPageLimit');
@@ -144,6 +170,20 @@ export default function FilmsPage() {
     e.stopPropagation();
     setFilmIdToDelete(filmId);
     setDeleteDialogOpen(true);
+  };
+
+  const handleSyncClick = async (filmId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSyncingId(filmId);
+    try {
+      await syncFilmMetadata(filmId);
+      toast.success("Metadati sincronizzati");
+      await fetchFilmsList();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Errore durante la sincronizzazione");
+    } finally {
+      setSyncingId(null);
+    }
   };
 
   const handleSort = (column: string) => {
@@ -279,15 +319,169 @@ export default function FilmsPage() {
         </div>
       )}
 
-      {/* Results Count and Pagination Info */}
-      <div className="mb-4 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
-        <p className="text-sm text-muted-foreground">
-          {meta && `Mostra ${meta.total} film totali`}
-        </p>
-        <div className="flex items-center gap-2">
-          <Label htmlFor="limit" className="text-sm whitespace-nowrap">Righe per pagina:</Label>
+
+
+      {/* Table */}
+      <div className="border rounded-lg bg-card overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="min-w-[200px] sm:w-[40%]">
+                <button
+                  onClick={() => handleSort("title")}
+                  className="flex items-center hover:text-foreground transition-colors text-xs sm:text-sm font-medium"
+                >
+                  Titolo
+                  {getSortIcon("title")}
+                </button>
+              </TableHead>
+              <TableHead className="hidden sm:table-cell">
+                <button
+                  onClick={() => handleSort("year")}
+                  className="flex items-center hover:text-foreground transition-colors text-xs sm:text-sm font-medium"
+                >
+                  Anno
+                  {getSortIcon("year")}
+                </button>
+              </TableHead>
+              <TableHead className="hidden sm:table-cell">
+                <button
+                  onClick={() => handleSort("status")}
+                  className="flex items-center hover:text-foreground transition-colors text-xs sm:text-sm font-medium"
+                >
+                  Stato
+                  {getSortIcon("status")}
+                </button>
+              </TableHead>
+              <TableHead className="hidden sm:table-cell text-xs sm:text-sm">Lingua</TableHead>
+              <TableHead className="text-xs sm:text-sm">AnimeWorld</TableHead>
+              <TableHead className="text-right text-xs sm:text-sm">Azioni</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {films.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="h-24 text-center">
+                  <div className="flex flex-col items-center justify-center text-muted-foreground">
+                    <FilmIcon className="h-8 w-8 mb-2" />
+                    <p className="font-medium">Nessun film trovato</p>
+                    <p className="text-sm mt-1">
+                      {search
+                        ? "Prova con un termine di ricerca diverso"
+                        : "I film appariranno qui quando verranno sincronizzati da Radarr"}
+                    </p>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : (
+              films.map((film) => (
+                <TableRow key={film.id} className="hover:bg-muted/50">
+                  <TableCell className="font-medium">
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm sm:text-base">{film.title}</span>
+                        {!film.animeworldUrl && (
+                          <Badge variant="outline" className="text-xs bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800">
+                            Link mancante
+                          </Badge>
+                        )}
+                      </div>
+                      <span className="sm:hidden text-xs text-muted-foreground">
+                        {film.year || ""}{film.year && film.status ? " · " : ""}{film.status}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="hidden sm:table-cell">{film.year || "-"}</TableCell>
+                  <TableCell className="hidden sm:table-cell">
+                    <span
+                      className={`inline-block px-2 py-1 text-xs rounded-full ${
+                        film.status === "ongoing"
+                          ? "bg-green-100 dark:bg-green-950 text-green-800 dark:text-green-300"
+                          : film.status === "completed"
+                          ? "bg-muted text-muted-foreground"
+                          : "bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300"
+                      }`}
+                    >
+                      {film.status}
+                    </span>
+                  </TableCell>
+                  <TableCell className="hidden sm:table-cell">
+                    <Badge variant="outline">{languageBadge(film.preferredLanguage)}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    {film.animeworldUrl ? (
+                      <a
+                        href={`${animeworldBaseUrl}/play/${film.animeworldUrl}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                      >
+                        Link <ExternalLink className="h-3 w-3" />
+                      </a>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex gap-1 sm:gap-2 justify-end">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={(e) => handleSyncClick(film.id, e)}
+                        disabled={syncingId === film.id}
+                        title="Sincronizza metadati da Radarr e ricerca link AnimeWorld"
+                      >
+                        {syncingId === film.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={(e) => handleEditClick(film, e)}
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={(e) => handleDeleteClick(film.id, e)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Pagination */}
+      <div className="mt-4 sm:mt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="text-xs sm:text-sm text-muted-foreground order-2 sm:order-1">
+          {meta && meta.lastPage > 1 && `Pagina ${meta.currentPage} di ${meta.lastPage} (${meta.total} totali)`}
+        </div>
+        <div className="flex gap-2 order-1 sm:order-2">
+          {meta && meta.lastPage > 1 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1 || loading}
+            >
+              <ChevronLeft className="h-4 w-4 sm:mr-1" />
+              <span className="hidden sm:inline">Precedente</span>
+            </Button>
+          )}
           <Select value={limit.toString()} onValueChange={handleLimitChange}>
-            <SelectTrigger id="limit" className="w-20">
+            <SelectTrigger className="w-[70px] h-8 text-xs" size="sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -297,128 +491,19 @@ export default function FilmsPage() {
               <SelectItem value="100">100</SelectItem>
             </SelectContent>
           </Select>
-        </div>
-      </div>
-
-      {/* Table */}
-      <div className="border rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-12"></TableHead>
-                <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort("title")}>
-                  <div className="flex items-center">
-                    Titolo
-                    {getSortIcon("title")}
-                  </div>
-                </TableHead>
-                <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort("year")}>
-                  <div className="flex items-center">
-                    Anno
-                    {getSortIcon("year")}
-                  </div>
-                </TableHead>
-                <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort("status")}>
-                  <div className="flex items-center">
-                    Stato
-                    {getSortIcon("status")}
-                  </div>
-                </TableHead>
-                <TableHead>Lingua</TableHead>
-                <TableHead>AnimeWorld</TableHead>
-                <TableHead className="text-right">Azioni</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {films.map((film) => (
-                <TableRow key={film.id} className="hover:bg-muted/50">
-                  <TableCell>
-                    <FilmIcon className="h-5 w-5 text-muted-foreground" />
-                  </TableCell>
-                  <TableCell className="font-medium">{film.title}</TableCell>
-                  <TableCell>{film.year || "-"}</TableCell>
-                  <TableCell>
-                    <Badge variant={
-                      film.status === "completed" ? "default" :
-                      film.status === "ongoing" ? "secondary" : "outline"
-                    }>
-                      {film.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">
-                      {film.preferredLanguage === "sub" ? "SUB" : 
-                       film.preferredLanguage === "ita" ? "ITA" : "DUAL"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {film.animeworldUrl ? (
-                      <a 
-                        href={film.animeworldUrl} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                      >
-                        Link <ExternalLink className="h-3 w-3" />
-                      </a>
-                    ) : (
-                      <Badge variant="destructive">Mancante</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={(e) => handleEditClick(film, e)}
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={(e) => handleDeleteClick(film.id, e)}
-                      >
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </div>
-
-      {/* Pagination */}
-      {meta && (
-        <div className="mt-4 flex flex-col sm:flex-row justify-between items-center gap-4">
-          <p className="text-sm text-muted-foreground">
-            Pagina {meta.currentPage} di {meta.lastPage}
-          </p>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={!meta || page === 1}
-            >
-              <ChevronLeft className="h-4 w-4 mr-1" />
-              Precedente
-            </Button>
+          {meta && meta.lastPage > 1 && (
             <Button
               variant="outline"
               size="sm"
               onClick={() => setPage((p) => p + 1)}
-              disabled={!meta || !meta.hasMorePages}
+              disabled={!meta.hasMorePages || loading}
             >
-              Successiva
-              <ChevronRight className="h-4 w-4 ml-1" />
+              <span className="hidden sm:inline">Successiva</span>
+              <ChevronRight className="h-4 w-4 sm:ml-1" />
             </Button>
-          </div>
+          )}
         </div>
-      )}
+      </div>
 
       {/* Edit Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
@@ -442,9 +527,9 @@ export default function FilmsPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="sub">Sottotitoli (SUB)</SelectItem>
-                  <SelectItem value="ita">Italiano (ITA)</SelectItem>
-                  <SelectItem value="dual">Dual Audio</SelectItem>
+                  {Object.entries(languageLabels).map(([code, label]) => (
+                    <SelectItem key={code} value={code}>{label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

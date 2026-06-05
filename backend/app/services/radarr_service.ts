@@ -53,6 +53,7 @@ export interface RadarrWantedRecord {
   digitalRelease?: string
   monitored: boolean
   isAvailable: boolean
+  tags: number[]
 }
 
 export interface RadarrWantedResponse {
@@ -142,6 +143,27 @@ export class RadarrService {
   }
 
   /**
+   * Get all movies from Radarr
+   */
+  async getAllMovies(): Promise<RadarrMovie[]> {
+    this.ensureInitialized()
+    this.ensureHealthy()
+
+    try {
+      const response = await axios.get<RadarrMovie[]>(`${this.radarrUrl}/api/v3/movie`, {
+        headers: {
+          'X-Api-Key': this.radarrToken,
+        },
+      })
+
+      return response.data
+    } catch (error) {
+      logger.error('RadarrService', 'Errore durante il recupero dei film', error)
+      throw error
+    }
+  }
+
+  /**
    * Fetch wanted/missing movies from Radarr
    */
   async getWantedMissingMovies(
@@ -202,13 +224,14 @@ export class RadarrService {
       const now = DateTime.now()
       const twoWeeksFromNow = now.plus({ weeks: 2 })
 
-      // Check digital release first (most relevant for downloads)
-      if (movie.digitalRelease) {
-        const digital = DateTime.fromISO(movie.digitalRelease)
-        if (digital.isValid && digital <= twoWeeksFromNow) {
+      // Check cinema release first: AniList tends to store the theatrical release date,
+      // so it gives the best match against the AniList/MAL air-date window
+      if (movie.inCinemas) {
+        const cinema = DateTime.fromISO(movie.inCinemas)
+        if (cinema.isValid && cinema <= twoWeeksFromNow) {
           hasValidReleaseDate = true
-          releaseDate = movie.digitalRelease
-          releaseType = 'digital'
+          releaseDate = movie.inCinemas
+          releaseType = 'cinema'
         }
       }
 
@@ -222,13 +245,13 @@ export class RadarrService {
         }
       }
 
-      // Finally check cinema release
-      if (!hasValidReleaseDate && movie.inCinemas) {
-        const cinema = DateTime.fromISO(movie.inCinemas)
-        if (cinema.isValid && cinema <= twoWeeksFromNow) {
+      // Finally check digital release
+      if (!hasValidReleaseDate && movie.digitalRelease) {
+        const digital = DateTime.fromISO(movie.digitalRelease)
+        if (digital.isValid && digital <= twoWeeksFromNow) {
           hasValidReleaseDate = true
-          releaseDate = movie.inCinemas
-          releaseType = 'cinema'
+          releaseDate = movie.digitalRelease
+          releaseType = 'digital'
         }
       }
 

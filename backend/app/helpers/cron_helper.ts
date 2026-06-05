@@ -1,6 +1,13 @@
 import cron from 'node-cron'
 import Config from '#models/config'
-import { BaseTask, UpdateMetadataTask, FetchWantedTask, ServiceType } from '../tasks/index.js'
+import {
+  BaseTask,
+  UpdateSeriesMetadataTask,
+  FetchWantedSeriesTask,
+  UpdateFilmMetadataTask,
+  FetchWantedFilmsTask,
+  ServiceType,
+} from '../tasks/index.js'
 import { DateTime } from 'luxon'
 
 interface TaskInstance {
@@ -23,26 +30,13 @@ class CronHelper {
    * Initialize all tasks
    */
   async initialize() {
-    // Get intervals from config or use defaults
-    let metadataInterval = 120
-    let wantedInterval = 30
+    // Sonarr tasks
+    await this.registerTask(new UpdateSeriesMetadataTask())
+    await this.registerTask(new FetchWantedSeriesTask())
+    // Radarr tasks
+    await this.registerTask(new UpdateFilmMetadataTask())
+    await this.registerTask(new FetchWantedFilmsTask())
 
-    try {
-      metadataInterval = parseInt(await Config.get('sonarr_updatemetadata_interval') || '120')
-      wantedInterval = parseInt(await Config.get('sonarr_fetchwanted_interval') || '30')
-    } catch (error) {
-      // Config table might not exist yet (during migrations)
-      console.log('Using default task intervals (config not available)')
-    }
-
-    // Create task instances
-    const updateMetadataTask = new UpdateMetadataTask(metadataInterval)
-    const fetchWantedTask = new FetchWantedTask(wantedInterval)
-
-    // Register tasks
-    await this.registerTask(updateMetadataTask)
-    await this.registerTask(fetchWantedTask)
-    
     console.log(`Initialized ${this.tasks.size} cron jobs`)
   }
 
@@ -50,6 +44,22 @@ class CronHelper {
    * Register and schedule a task
    */
   private async registerTask(task: BaseTask) {
+    // Start from the task's own default, then override from persisted config if present
+    task.intervalMinutes = task.defaultIntervalMinutes
+    try {
+      const stored = await Config.get(task.intervalConfigKey)
+      const parsed = stored ? parseInt(stored) : NaN
+      if (!Number.isNaN(parsed) && parsed > 0) {
+        task.intervalMinutes = parsed
+      }
+    } catch (error) {
+      // Config table might not exist yet (during migrations)
+      console.log(`Using default interval for ${task.id} (config not available)`)
+    }
+
+    // Keep nextRunAt aligned with the resolved interval
+    task.setNextRunAt(DateTime.now().plus({ minutes: task.intervalMinutes }))
+
     const cronExpression = this.minutesToCron(task.intervalMinutes)
     
     const taskInstance: TaskInstance = {
@@ -127,8 +137,7 @@ class CronHelper {
     taskInstance.cronExpression = this.minutesToCron(intervalMinutes)
 
     // Save to config
-    const configKey = `${taskInstance.task.serviceType}_${taskId.replace('_', '')}_interval`
-    await Config.set(configKey, intervalMinutes.toString())
+    await Config.set(taskInstance.task.intervalConfigKey, intervalMinutes.toString())
 
     // Reschedule
     await this.scheduleTask(taskId)

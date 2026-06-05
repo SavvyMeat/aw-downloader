@@ -1,5 +1,5 @@
 import { AnimeworldService, FilterDub, FilterType } from '#services/animeworld_service'
-import { MetadataSyncService } from '#services/metadata_sync_service'
+import { SeriesMetadataSyncService } from '#services/series_metadata_sync_service'
 import logger from '@adonisjs/core/services/logger'
 import { test } from '@japa/runner'
 
@@ -118,7 +118,7 @@ test.group('Anime Search Integration', () => {
       assert.isArray(animeworldResults)
       assert.isNotEmpty(animeworldResults, `Should find results using titles ${candidateTitles.join(', ')}`)
 
-      const metadataSyncService = new MetadataSyncService()
+      const metadataSyncService = new SeriesMetadataSyncService()
       const parsedResults = await metadataSyncService.parseAnimeWorldResults(animeworldResults, {
         hasValidAirDate: true,
         startDate: season.from,
@@ -147,7 +147,7 @@ test.group('Anime Search Integration', () => {
 
     logger.info(`\n=== Re:Zero Season-by-Season Search ===$`)
 
-    const metadataSyncService = new MetadataSyncService()
+    const metadataSyncService = new SeriesMetadataSyncService()
 
     for (const season of rezeroSeasons) {
       logger.info(`\n--- Testing: ${season.title} (${season.from}-${season.to}) ---`)
@@ -229,7 +229,7 @@ test.group('Anime Search Integration', () => {
     assert.isArray(animeworldResults)
     assert.isNotEmpty(animeworldResults, `Should find results using titles ${candidateTitles.join(', ')}`)
 
-    const metadataSyncService = new MetadataSyncService()
+    const metadataSyncService = new SeriesMetadataSyncService()
     const parsedResults = await metadataSyncService.parseAnimeWorldResults(animeworldResults, {
       hasValidAirDate: true,
       startDate: myHeroAcademiaMovie.from,

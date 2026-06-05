@@ -21,7 +21,10 @@ export default class SendNotificationOnDownloadSuccess {
 
       const notificationService = getNotificationService()
       const title = 'Download Completato'
-      const message = `${event.data.seriesTitle} - S${event.data.seasonNumber.toString().padStart(2, '0')}E${event.data.episodeNumber.toString().padStart(2, '0')}\n${event.data.episodeTitle}`
+      const message =
+        event.data.mediaType === 'film'
+          ? `${event.data.filmTitle}${event.data.year ? ` (${event.data.year})` : ''}`
+          : `${event.data.seriesTitle} - S${event.data.seasonNumber.toString().padStart(2, '0')}E${event.data.episodeNumber.toString().padStart(2, '0')}\n${event.data.episodeTitle}`
 
       // Send notification to all filtered notification URLs
       for (const notification of filteredNotifications) {

@@ -6,7 +6,10 @@ export default class RootFolder extends BaseModel {
   declare id: number
 
   @column()
-  declare sonarrId: number
+  declare serviceId: number
+
+  @column()
+  declare service: 'sonarr' | 'radarr'
 
   @column()
   declare path: string

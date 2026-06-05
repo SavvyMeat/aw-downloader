@@ -16,7 +16,9 @@ export abstract class BaseTask {
   abstract description: string
   abstract defaultIntervalMinutes: number
   abstract serviceType: ServiceType
-  
+  /** Config key used to persist/read this task's interval */
+  abstract intervalConfigKey: string
+
   intervalMinutes: number
 
   protected taskStatus: TaskStatus = {

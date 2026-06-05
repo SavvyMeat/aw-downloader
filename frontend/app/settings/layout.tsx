@@ -1,6 +1,6 @@
 "use client";
 
-import { Settings2, Tv } from "lucide-react";
+import { Film, Settings2, Tv } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -19,6 +19,11 @@ const sidebarNavItems = [
     title: "Sonarr",
     href: "/settings/sonarr",
     icon: Tv,
+  },
+  {
+    title: "Radarr",
+    href: "/settings/radarr",
+    icon: Film,
   },
 ];
 

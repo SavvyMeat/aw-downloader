@@ -21,7 +21,10 @@ export default class SendNotificationOnDownloadError {
 
       const notificationService = getNotificationService()
       const title = 'Download Fallito'
-      const message = `${event.data.seriesTitle} - S${event.data.seasonNumber.toString().padStart(2, '0')}E${event.data.episodeNumber.toString().padStart(2, '0')}\n${event.data.episodeTitle}\n\nErrore: ${event.data.error}`
+      const message =
+        event.data.mediaType === 'film'
+          ? `${event.data.filmTitle}${event.data.year ? ` (${event.data.year})` : ''}\n\nErrore: ${event.data.error}`
+          : `${event.data.seriesTitle} - S${event.data.seasonNumber.toString().padStart(2, '0')}E${event.data.episodeNumber.toString().padStart(2, '0')}\n${event.data.episodeTitle}\n\nErrore: ${event.data.error}`
 
       // Send notification to all filtered notification URLs
       for (const notification of filteredNotifications) {

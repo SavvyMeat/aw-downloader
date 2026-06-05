@@ -1,6 +1,6 @@
 "use client";
 
-import { SonarrStatusBadge } from "@/components/sonarr-status-badge";
+import { RadarrStatusBadge } from "@/components/radarr-status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -14,26 +14,24 @@ import {
   fetchTasks as apiFetchTasks,
   updateConfig as apiUpdateConfig,
   updateTaskInterval as apiUpdateTaskInterval,
+  fetchRadarrTags,
   fetchRootFolders,
-  fetchSonarrTags,
-  forceSonarrHealthCheck,
+  forceRadarrHealthCheck,
   syncRootFolders,
   updateRootFolderMapping,
-  type RootFolder
+  type RootFolder,
 } from "@/lib/api";
 import { debounce } from "lodash";
-import { Check, Clock, FolderOpen, Loader2, Pencil, RefreshCw, Save, Tv, X } from "lucide-react";
+import { Check, Clock, Film, FolderOpen, Loader2, Pencil, RefreshCw, Save, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 // Interval steps: 15, 30, 60, 120, 240, 720, 1440, 2880 (in minutes)
 const INTERVAL_STEPS = [15, 30, 60, 120, 240, 720, 1440, 2880];
 
-// Convert minutes to step index
 const minutesToStep = (minutes: number): number => {
   let closestIndex = 0;
   let minDiff = Math.abs(INTERVAL_STEPS[0] - minutes);
-
   for (let i = 1; i < INTERVAL_STEPS.length; i++) {
     const diff = Math.abs(INTERVAL_STEPS[i] - minutes);
     if (diff < minDiff) {
@@ -41,16 +39,11 @@ const minutesToStep = (minutes: number): number => {
       closestIndex = i;
     }
   }
-
   return closestIndex;
 };
 
-// Convert step index to minutes
-const stepToMinutes = (step: number): number => {
-  return INTERVAL_STEPS[step] || INTERVAL_STEPS[0];
-};
+const stepToMinutes = (step: number): number => INTERVAL_STEPS[step] || INTERVAL_STEPS[0];
 
-// Format minutes to readable string
 const formatMinutes = (minutes: number): string => {
   if (minutes < 60) return `${minutes} min`;
   const hours = Math.floor(minutes / 60);
@@ -69,35 +62,32 @@ interface Task {
 }
 
 interface Configs {
-  sonarr_url?: string;
-  sonarr_token?: string;
-  sonarr_filter_anime_only?: boolean;
-  sonarr_auto_rename?: boolean;
-  sonarr_tags_mode?: string;
-  sonarr_tags?: Array<{ label: string; value: string }>;
+  radarr_url?: string;
+  radarr_token?: string;
+  radarr_auto_rename?: boolean;
+  radarr_tags_mode?: string;
+  radarr_tags?: Array<{ label: string; value: string }>;
 }
 
 interface ConfigInputs {
-  sonarr_url: string;
-  sonarr_token: string;
-  sonarr_filter_anime_only: boolean;
-  sonarr_auto_rename: boolean;
-  sonarr_tags_mode: string;
-  sonarr_tags: string[];
+  radarr_url: string;
+  radarr_token: string;
+  radarr_auto_rename: boolean;
+  radarr_tags_mode: string;
+  radarr_tags: string[];
 }
 
-export default function SonarrSettingsPage() {
+export default function RadarrSettingsPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [intervals, setIntervals] = useState<Record<string, number>>({});
-  const [sonarrTags, setSonarrTags] = useState<Array<{ value: string; label: string }>>([]);
+  const [radarrTags, setRadarrTags] = useState<Array<{ value: string; label: string }>>([]);
   const [configs, setConfigs] = useState<Configs>({});
   const [configInputs, setConfigInputs] = useState<ConfigInputs>({
-    sonarr_url: "",
-    sonarr_token: "",
-    sonarr_filter_anime_only: true,
-    sonarr_auto_rename: false,
-    sonarr_tags_mode: "blacklist",
-    sonarr_tags: [],
+    radarr_url: "",
+    radarr_token: "",
+    radarr_auto_rename: false,
+    radarr_tags_mode: "blacklist",
+    radarr_tags: [],
   });
   const [loading, setLoading] = useState(true);
   const [rootFolders, setRootFolders] = useState<RootFolder[]>([]);
@@ -107,32 +97,14 @@ export default function SonarrSettingsPage() {
   const [isSavingConfig, startSavingConfig] = useTransition();
   const [isSyncingRootFolders, startSyncingRootFolders] = useTransition();
   const [savingConfigKey, setSavingConfigKey] = useState<string | null>(null);
-  const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
-
-  const saveConfig = useCallback(async (key: string, value: string) => {
-    try {
-      await apiUpdateConfig(key, value);
-      toast.success("Configurazione aggiornata");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Errore salvataggio");
-    }
-  }, []);
-
-  const debouncedSaveConfig = useMemo(
-    () => debounce(saveConfig, 1000),
-    [saveConfig]
-  );
 
   const saveTaskInterval = useCallback(async (taskId: string, taskName: string, intervalMinutes: number) => {
-    setSavingTaskId(taskId);
     try {
       await apiUpdateTaskInterval(taskId, intervalMinutes);
       toast.success(`Intervallo aggiornato per "${taskName}"`);
       await fetchTasksList();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Errore aggiornamento");
-    } finally {
-      setSavingTaskId(null);
     }
   }, []);
 
@@ -143,16 +115,15 @@ export default function SonarrSettingsPage() {
 
   useEffect(() => {
     return () => {
-      debouncedSaveConfig.cancel();
       debouncedSaveTaskInterval.cancel();
     };
-  }, [debouncedSaveConfig, debouncedSaveTaskInterval]);
+  }, [debouncedSaveTaskInterval]);
 
   useEffect(() => {
     fetchTasksList();
     fetchConfigsList();
+    fetchRadarrTagsList();
     fetchRootFoldersList();
-    fetchSonarrTagsList();
   }, []);
 
   const handleTaskIntervalChange = useCallback((taskId: string, taskName: string, stepIndex: number) => {
@@ -163,7 +134,7 @@ export default function SonarrSettingsPage() {
 
   const fetchTasksList = async () => {
     try {
-      const data = await apiFetchTasks("sonarr");
+      const data = await apiFetchTasks("radarr");
       setTasks(data as unknown as Task[]);
 
       const initialIntervals: Record<string, number> = {};
@@ -184,39 +155,47 @@ export default function SonarrSettingsPage() {
       setConfigs(data as Configs);
 
       let parsedTags: Array<{ value: string; label: string }> = [];
-      if (data.sonarr_tags) {
+      if (data.radarr_tags) {
         try {
-          if (Array.isArray(data.sonarr_tags)) {
-            parsedTags = data.sonarr_tags;
-          } else if (typeof data.sonarr_tags === 'string') {
-            parsedTags = JSON.parse(data.sonarr_tags);
+          if (Array.isArray(data.radarr_tags)) {
+            parsedTags = data.radarr_tags;
+          } else if (typeof data.radarr_tags === "string") {
+            parsedTags = JSON.parse(data.radarr_tags);
           }
         } catch (e) {
-          console.error('Error parsing sonarr_tags:', e);
+          console.error("Error parsing radarr_tags:", e);
           parsedTags = [];
         }
       }
 
       setConfigInputs({
-        sonarr_url: data.sonarr_url || "",
-        sonarr_token: "",
-        sonarr_filter_anime_only: typeof data.sonarr_filter_anime_only === 'boolean' ? data.sonarr_filter_anime_only : data.sonarr_filter_anime_only !== 'false',
-        sonarr_auto_rename: typeof data.sonarr_auto_rename === 'boolean' ? data.sonarr_auto_rename : data.sonarr_auto_rename === 'true',
-        sonarr_tags_mode: data.sonarr_tags_mode || "blacklist",
-        sonarr_tags: parsedTags.map((t: any) => String(t.value || t)),
+        radarr_url: data.radarr_url || "",
+        radarr_token: "",
+        radarr_auto_rename: typeof data.radarr_auto_rename === "boolean" ? data.radarr_auto_rename : data.radarr_auto_rename === "true",
+        radarr_tags_mode: data.radarr_tags_mode || "blacklist",
+        radarr_tags: parsedTags.map((t: any) => String(t.value || t)),
       });
     } catch (err) {
       console.error("Error fetching configs:", err);
     }
   };
 
+  const fetchRadarrTagsList = async () => {
+    try {
+      const tags = await fetchRadarrTags();
+      setRadarrTags(tags.map(tag => ({ value: String(tag.id), label: tag.label })));
+    } catch (err) {
+      console.error("Error fetching Radarr tags:", err);
+    }
+  };
+
   const fetchRootFoldersList = async () => {
     try {
-      const data = await fetchRootFolders("sonarr");
+      const data = await fetchRootFolders("radarr");
       setRootFolders(data);
 
       const mappings: Record<number, string> = {};
-      data.forEach(folder => {
+      data.forEach((folder) => {
         mappings[folder.id] = folder.mappedPath || "";
       });
       setMappingInputs(mappings);
@@ -225,30 +204,21 @@ export default function SonarrSettingsPage() {
     }
   };
 
-  const fetchSonarrTagsList = async () => {
-    try {
-      const tags = await fetchSonarrTags();
-      setSonarrTags(tags.map(tag => ({ value: String(tag.id), label: tag.label })));
-    } catch (err) {
-      console.error("Error fetching Sonarr tags:", err);
-    }
-  };
-
   const handleSyncRootFolders = () => {
     startSyncingRootFolders(async () => {
       try {
-        const result = await syncRootFolders("sonarr");
+        const result = await syncRootFolders("radarr");
         setRootFolders(result.rootFolders);
 
         const mappings: Record<number, string> = {};
-        result.rootFolders.forEach(folder => {
+        result.rootFolders.forEach((folder) => {
           mappings[folder.id] = folder.mappedPath || "";
         });
         setMappingInputs(mappings);
 
         toast.success(result.message);
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Errore sincronizzazione. Verifica che Sonarr sia raggiungibile.");
+        toast.error(err instanceof Error ? err.message : "Errore sincronizzazione. Verifica che Radarr sia raggiungibile.");
       }
     });
   };
@@ -269,66 +239,50 @@ export default function SonarrSettingsPage() {
     setConfigInputs((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleFilterAnimeOnlyToggle = async (checked: boolean) => {
-    setConfigInputs((prev) => ({ ...prev, sonarr_filter_anime_only: checked }));
-
-    try {
-      await apiUpdateConfig("sonarr_filter_anime_only", checked);
-      setConfigs((prev) => ({ ...prev, sonarr_filter_anime_only: checked }));
-      toast.success(checked ? "Filtro anime attivato" : "Filtro anime disattivato");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Errore salvataggio impostazione");
-      setConfigInputs((prev) => ({ ...prev, sonarr_filter_anime_only: !checked }));
-    }
-  };
-
   const handleAutoRenameToggle = async (checked: boolean) => {
-    setConfigInputs((prev) => ({ ...prev, sonarr_auto_rename: checked }));
-
+    setConfigInputs((prev) => ({ ...prev, radarr_auto_rename: checked }));
     try {
-      await apiUpdateConfig("sonarr_auto_rename", checked);
-      setConfigs((prev) => ({ ...prev, sonarr_auto_rename: checked }));
+      await apiUpdateConfig("radarr_auto_rename", checked);
+      setConfigs((prev) => ({ ...prev, radarr_auto_rename: checked }));
       toast.success(checked ? "Rinomina automatica attivata" : "Rinomina automatica disattivata");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Errore salvataggio impostazione");
-      setConfigInputs((prev) => ({ ...prev, sonarr_auto_rename: !checked }));
+      setConfigInputs((prev) => ({ ...prev, radarr_auto_rename: !checked }));
     }
   };
 
   const handleTagModeChange = async (value: string) => {
-    setConfigInputs((prev) => ({ ...prev, sonarr_tags_mode: value }));
-
+    setConfigInputs((prev) => ({ ...prev, radarr_tags_mode: value }));
     try {
-      await apiUpdateConfig("sonarr_tags_mode", value);
-      setConfigs((prev) => ({ ...prev, sonarr_tags_mode: value }));
-      toast.success(`Modalità tag impostata su ${value === 'blacklist' ? 'blacklist' : 'whitelist'}`);
+      await apiUpdateConfig("radarr_tags_mode", value);
+      setConfigs((prev) => ({ ...prev, radarr_tags_mode: value }));
+      toast.success(`Modalità tag impostata su ${value === "blacklist" ? "blacklist" : "whitelist"}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Errore salvataggio modalità tag");
-      setConfigInputs((prev) => ({ ...prev, sonarr_tags_mode: configInputs.sonarr_tags_mode }));
+      setConfigInputs((prev) => ({ ...prev, radarr_tags_mode: configInputs.radarr_tags_mode }));
     }
   };
 
   const handleTagsChange = async (selectedValues: string[]) => {
-    setConfigInputs((prev) => ({ ...prev, sonarr_tags: selectedValues }));
-
+    setConfigInputs((prev) => ({ ...prev, radarr_tags: selectedValues }));
     try {
       const tagObjects = selectedValues.map(value => {
-        const tag = sonarrTags.find(t => t.value === value);
+        const tag = radarrTags.find(t => t.value === value);
         return { value, label: tag?.label || value };
       });
-      await apiUpdateConfig("sonarr_tags", tagObjects);
-      setConfigs((prev) => ({ ...prev, sonarr_tags: tagObjects }));
+      await apiUpdateConfig("radarr_tags", tagObjects);
+      setConfigs((prev) => ({ ...prev, radarr_tags: tagObjects }));
       toast.success("Tag aggiornati");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Errore salvataggio tag");
-      setConfigInputs((prev) => ({ ...prev, sonarr_tags: configInputs.sonarr_tags }));
+      setConfigInputs((prev) => ({ ...prev, radarr_tags: configInputs.radarr_tags }));
     }
   };
 
   const handleSaveConfig = (configKey: keyof Configs) => {
     const value = configInputs[configKey];
 
-    if (configKey === "sonarr_token" && !value) {
+    if (configKey === "radarr_token" && !value) {
       toast.error("Inserisci un token per aggiornarlo");
       return;
     }
@@ -338,24 +292,22 @@ export default function SonarrSettingsPage() {
       try {
         await apiUpdateConfig(configKey, value);
 
-        const configNames: Record<keyof Configs, string> = {
-          sonarr_url: "URL Sonarr",
-          sonarr_token: "Token API",
-          sonarr_filter_anime_only: "Filtra Solo Anime",
-          sonarr_auto_rename: "Rinomina Automatica",
-          sonarr_tags_mode: "Modalità Tag",
-          sonarr_tags: "Tag",
+        const configNames: Partial<Record<keyof Configs, string>> = {
+          radarr_url: "URL Radarr",
+          radarr_token: "Token API",
+          radarr_auto_rename: "Rinomina Automatica",
+          radarr_tags_mode: "Modalità Tag",
+          radarr_tags: "Tag",
         };
 
-        const configName = configNames[configKey] || configKey;
-        toast.success(`${configName} salvato con successo`);
+        toast.success(`${configNames[configKey] || configKey} salvato con successo`);
         await fetchConfigsList();
 
-        if (configKey === "sonarr_url" || configKey === "sonarr_token") {
+        if (configKey === "radarr_url" || configKey === "radarr_token") {
           try {
-            await forceSonarrHealthCheck();
+            await forceRadarrHealthCheck();
           } catch (err) {
-            console.error("Failed to check Sonarr health:", err);
+            console.error("Failed to check Radarr health:", err);
           }
         }
       } catch (err) {
@@ -378,45 +330,45 @@ export default function SonarrSettingsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Sonarr Health Status */}
-      <SonarrStatusBadge />
+      {/* Radarr Health Status */}
+      <RadarrStatusBadge />
 
-      {/* Sonarr Configuration */}
+      {/* Radarr Configuration */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Tv className="h-5 w-5" />
-            Configurazione Sonarr
+            <Film className="h-5 w-5" />
+            Configurazione Radarr
           </CardTitle>
           <CardDescription>
-            Configura la connessione al tuo server Sonarr
+            Configura la connessione al tuo server Radarr per i film
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Left Column - Connection Settings */}
             <div className="space-y-4">
-              {/* Sonarr URL */}
+              {/* Radarr URL */}
               <div className="space-y-2">
-                <Label htmlFor="sonarr-url">URL Sonarr</Label>
+                <Label htmlFor="radarr-url">URL Radarr</Label>
                 <div className="flex w-full items-center gap-2">
                   <Input
-                    id="sonarr-url"
+                    id="radarr-url"
                     type="url"
-                    value={configInputs.sonarr_url}
-                    onChange={(e) => handleConfigChange("sonarr_url", e.target.value)}
-                    placeholder="http://localhost:8989"
+                    value={configInputs.radarr_url}
+                    onChange={(e) => handleConfigChange("radarr_url", e.target.value)}
+                    placeholder="http://localhost:7878"
                   />
                   <Button
                     size="sm"
-                    onClick={() => handleSaveConfig("sonarr_url")}
+                    onClick={() => handleSaveConfig("radarr_url")}
                     disabled={
-                      (isSavingConfig && savingConfigKey === "sonarr_url") ||
-                      !configInputs.sonarr_url ||
-                      configInputs.sonarr_url === configs.sonarr_url
+                      (isSavingConfig && savingConfigKey === "radarr_url") ||
+                      !configInputs.radarr_url ||
+                      configInputs.radarr_url === configs.radarr_url
                     }
                   >
-                    {isSavingConfig && savingConfigKey === "sonarr_url" ? (
+                    {isSavingConfig && savingConfigKey === "radarr_url" ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                         Salvataggio...
@@ -430,30 +382,30 @@ export default function SonarrSettingsPage() {
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Indirizzo completo della tua istanza Sonarr
+                  Indirizzo completo della tua istanza Radarr
                 </p>
               </div>
 
-              {/* Sonarr Token */}
+              {/* Radarr Token */}
               <div className="space-y-2">
-                <Label htmlFor="sonarr-token">API Token</Label>
+                <Label htmlFor="radarr-token">API Token</Label>
                 <div className="flex w-full items-center gap-2">
                   <Input
-                    id="sonarr-token"
+                    id="radarr-token"
                     type="password"
-                    value={configInputs.sonarr_token}
-                    onChange={(e) => handleConfigChange("sonarr_token", e.target.value)}
-                    placeholder={configs.sonarr_token ? "••••••••••••••••••••••••••••••••" : "Inserisci il token API"}
+                    value={configInputs.radarr_token}
+                    onChange={(e) => handleConfigChange("radarr_token", e.target.value)}
+                    placeholder={configs.radarr_token ? "••••••••••••••••••••••••••••••••" : "Inserisci il token API"}
                   />
                   <Button
                     size="sm"
-                    onClick={() => handleSaveConfig("sonarr_token")}
+                    onClick={() => handleSaveConfig("radarr_token")}
                     disabled={
-                      (isSavingConfig && savingConfigKey === "sonarr_token") ||
-                      !configInputs.sonarr_token
+                      (isSavingConfig && savingConfigKey === "radarr_token") ||
+                      !configInputs.radarr_token
                     }
                   >
-                    {isSavingConfig && savingConfigKey === "sonarr_token" ? (
+                    {isSavingConfig && savingConfigKey === "radarr_token" ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                         Salvataggio...
@@ -469,7 +421,7 @@ export default function SonarrSettingsPage() {
                 <p className="text-xs text-muted-foreground">
                   Token API trovato in Impostazioni → Generale → Sicurezza
                 </p>
-                {configs.sonarr_token && (
+                {configs.radarr_token && (
                   <p className="text-xs text-green-600">
                     ✓ Token configurato (non modificato)
                   </p>
@@ -479,24 +431,6 @@ export default function SonarrSettingsPage() {
 
             {/* Right Column - Automation Settings */}
             <div className="space-y-4">
-              {/* Filter Anime Only Toggle */}
-              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between space-y-3 sm:space-y-0 sm:space-x-4">
-                <div className="space-y-1 flex-1">
-                  <Label htmlFor="filter-anime-only" className="cursor-pointer">
-                    Filtra solo anime
-                  </Label>
-                  <p className="text-xs sm:text-sm text-muted-foreground">
-                    Considera solo le serie con tipologia &quot;Anime&quot; in Sonarr
-                  </p>
-                </div>
-                <Switch
-                  id="filter-anime-only"
-                  checked={configInputs.sonarr_filter_anime_only}
-                  onCheckedChange={handleFilterAnimeOnlyToggle}
-                />
-              </div>
-              <div className="sm:hidden border-t my-4" />
-
               {/* Auto Rename Toggle */}
               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between space-y-3 sm:space-y-0 sm:space-x-4">
                 <div className="space-y-1 flex-1">
@@ -504,12 +438,12 @@ export default function SonarrSettingsPage() {
                     Rinomina automatica
                   </Label>
                   <p className="text-xs sm:text-sm text-muted-foreground">
-                    Dopo l&apos;importazione, rinomina automaticamente i file secondo lo schema di Sonarr
+                    Dopo l&apos;importazione, rinomina automaticamente i file secondo lo schema di Radarr
                   </p>
                 </div>
                 <Switch
                   id="auto-rename"
-                  checked={configInputs.sonarr_auto_rename}
+                  checked={configInputs.radarr_auto_rename}
                   onCheckedChange={handleAutoRenameToggle}
                 />
               </div>
@@ -520,11 +454,11 @@ export default function SonarrSettingsPage() {
                 <div className="space-y-1 flex-1">
                   <Label htmlFor="tag-mode">Modalità utilizzo tag</Label>
                   <p className="text-xs sm:text-sm text-muted-foreground">
-                    Seleziona come utilizzare i tag per filtrare le serie
+                    Seleziona come utilizzare i tag per filtrare i film
                   </p>
                 </div>
                 <Select
-                  value={configInputs.sonarr_tags_mode}
+                  value={configInputs.radarr_tags_mode}
                   onValueChange={handleTagModeChange}
                 >
                   <SelectTrigger id="tag-mode" className="w-full sm:w-[180px]">
@@ -548,8 +482,8 @@ export default function SonarrSettingsPage() {
                 </div>
                 <div className="w-full sm:w-auto">
                   <MultiSelect
-                    options={sonarrTags}
-                    selected={configInputs.sonarr_tags}
+                    options={radarrTags}
+                    selected={configInputs.radarr_tags}
                     onChange={handleTagsChange}
                     placeholder="Nessun tag selezionato"
                     emptyText="Nessun tag trovato"
@@ -569,10 +503,10 @@ export default function SonarrSettingsPage() {
             <div>
               <CardTitle className="flex items-center gap-2">
                 <FolderOpen className="h-5 w-5" />
-                Root Folders Sonarr
+                Root Folders Radarr
               </CardTitle>
               <CardDescription>
-                Gestisci le cartelle radice di Sonarr e le loro mappature locali
+                Gestisci le cartelle radice di Radarr e le loro mappature locali
               </CardDescription>
             </div>
             <Button
@@ -580,7 +514,7 @@ export default function SonarrSettingsPage() {
               size="icon"
               onClick={handleSyncRootFolders}
               disabled={isSyncingRootFolders}
-              title="Sincronizza root folders da Sonarr"
+              title="Sincronizza root folders da Radarr"
             >
               {isSyncingRootFolders ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -596,7 +530,7 @@ export default function SonarrSettingsPage() {
               <FolderOpen className="h-12 w-12 mx-auto mb-2 opacity-20" />
               <p>Nessuna root folder sincronizzata</p>
               <p className="text-sm mt-1">
-                Clicca il pulsante di refresh per sincronizzare le root folders da Sonarr
+                Clicca il pulsante di refresh per sincronizzare le root folders da Radarr
               </p>
             </div>
           ) : (
@@ -606,7 +540,7 @@ export default function SonarrSettingsPage() {
                   key={folder.id}
                   className="grid grid-cols-[1fr_1fr_auto] gap-4 items-center py-3 border-b last:border-b-0"
                 >
-                  {/* Sonarr Path */}
+                  {/* Radarr Path */}
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-medium truncate">{folder.path}</p>
@@ -635,7 +569,7 @@ export default function SonarrSettingsPage() {
                             [folder.id]: e.target.value,
                           }))
                         }
-                        placeholder="es. /tvseries"
+                        placeholder="es. /movies"
                         className="h-8 text-sm"
                         autoFocus
                       />
@@ -703,34 +637,38 @@ export default function SonarrSettingsPage() {
             Task Automatici
           </CardTitle>
           <CardDescription>
-            Configura gli intervalli di esecuzione dei task
+            Configura gli intervalli di esecuzione dei task Radarr
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {tasks.map((task) => (
-            <div key={task.id} className="space-y-3 pb-6 border-b last:border-0 last:pb-0">
-              <div>
-                <Label className="font-semibold">{task.name}</Label>
-                <p className="text-xs text-muted-foreground">{task.description}</p>
-              </div>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor={`interval-${task.id}`} className="text-sm">
-                    Intervallo
-                  </Label>
-                  <span className="text-sm font-medium">{formatMinutes(intervals[task.id] || 15)}</span>
+          {tasks.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nessun task Radarr disponibile</p>
+          ) : (
+            tasks.map((task) => (
+              <div key={task.id} className="space-y-3 pb-6 border-b last:border-0 last:pb-0">
+                <div>
+                  <Label className="font-semibold">{task.name}</Label>
+                  <p className="text-xs text-muted-foreground">{task.description}</p>
                 </div>
-                <Slider
-                  id={`interval-${task.id}`}
-                  min={0}
-                  max={INTERVAL_STEPS.length - 1}
-                  step={1}
-                  value={[minutesToStep(intervals[task.id] || 15)]}
-                  onValueChange={(value) => handleTaskIntervalChange(task.id, task.name, value[0])}
-                />
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor={`interval-${task.id}`} className="text-sm">
+                      Intervallo
+                    </Label>
+                    <span className="text-sm font-medium">{formatMinutes(intervals[task.id] || 15)}</span>
+                  </div>
+                  <Slider
+                    id={`interval-${task.id}`}
+                    min={0}
+                    max={INTERVAL_STEPS.length - 1}
+                    step={1}
+                    value={[minutesToStep(intervals[task.id] || 15)]}
+                    onValueChange={(value) => handleTaskIntervalChange(task.id, task.name, value[0])}
+                  />
+                </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </CardContent>
       </Card>
     </div>

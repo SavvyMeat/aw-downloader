@@ -57,7 +57,7 @@ export default class DownloadQueueController {
 
     try {
       const queue = getDownloadQueue()
-      const id = queue.addToQueue(data)
+      const id = queue.addToQueue({ mediaType: 'episode', ...data })
 
       return response.json({
         message: 'Item added to queue',

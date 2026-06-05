@@ -53,7 +53,7 @@ const menuItems = [
   {
     title: "Lista Serie",
     url: "/series",
-    icon: List,
+    icon: Tv,
   },
   {
     title: "Film",
@@ -77,6 +77,11 @@ const settingsItems = [
     title: "Sonarr",
     url: "/settings/sonarr",
     icon: Tv,
+  },
+  {
+    title: "Radarr",
+    url: "/settings/radarr",
+    icon: Film,
   },
 ];
 

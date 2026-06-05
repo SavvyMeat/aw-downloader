@@ -111,6 +111,16 @@ export default function DownloadQueueCard() {
     }
   };
 
+  const getItemTitle = (item: QueueItem): string =>
+    item.mediaType === "film" ? item.filmTitle : item.seriesTitle;
+
+  const getItemSubtitle = (item: QueueItem): string =>
+    item.mediaType === "film"
+      ? item.year
+        ? `Film • ${item.year}`
+        : "Film"
+      : `S${item.seasonNumber}E${item.episodeNumber} - ${item.episodeTitle}`;
+
   const formatSpeed = (bytesPerSecond: number): string => {
     const mbps = bytesPerSecond / (1024 * 1024);
     if (mbps >= 1) {
@@ -118,6 +128,13 @@ export default function DownloadQueueCard() {
     }
     const kbps = bytesPerSecond / 1024;
     return `${kbps.toFixed(2)} KB/s`;
+  };
+
+  const formatSize = (bytes: number): string => {
+    const gb = bytes / (1024 * 1024 * 1024);
+    if (gb >= 1) return `${gb.toFixed(2)} GB`;
+    const mb = bytes / (1024 * 1024);
+    return `${mb.toFixed(1)} MB`;
   };
 
   const getStatusIcon = (status: QueueItem["status"]) => {
@@ -237,11 +254,11 @@ export default function DownloadQueueCard() {
                     <div className="flex items-center gap-2">
                       {getStatusIcon(item.status)}
                       <h4 className="font-medium text-xs sm:text-sm truncate">
-                        {item.seriesTitle}
+                        {getItemTitle(item)}
                       </h4>
                     </div>
                     <p className="text-[10px] sm:text-xs text-muted-foreground truncate">
-                      S{item.seasonNumber}E{item.episodeNumber} - {item.episodeTitle}
+                      {getItemSubtitle(item)}
                     </p>
                   </div>
                   {(item.status === "pending" || item.status === "downloading") && (
@@ -267,6 +284,11 @@ export default function DownloadQueueCard() {
                       {getStatusText(item.status)}
                     </span>
                     <div className="flex items-center gap-1 sm:gap-2">
+                      {item.status === "downloading" && item.totalSize && (
+                        <span className="text-muted-foreground">
+                          {formatSize(item.totalSize)}
+                        </span>
+                      )}
                       {item.status === "downloading" && item.downloadSpeed && (
                         <span className="text-muted-foreground">
                           {formatSpeed(item.downloadSpeed)}
@@ -303,7 +325,8 @@ export default function DownloadQueueCard() {
             <AlertDialogDescription>
               {itemToCancel && (
                 <>
-                  Vuoi davvero annullare il download di <strong>{itemToCancel.seriesTitle}</strong> S{itemToCancel.seasonNumber}E{itemToCancel.episodeNumber}?
+                  Vuoi davvero annullare il download di <strong>{getItemTitle(itemToCancel)}</strong>
+                  {itemToCancel.mediaType === "episode" && ` S${itemToCancel.seasonNumber}E${itemToCancel.episodeNumber}`}?
                   <br /><br />
                   I file parziali già scaricati verranno eliminati.
                 </>

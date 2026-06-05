@@ -1,7 +1,7 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import Series from '#models/series'
 import Season from '#models/season'
-import { MetadataSyncService } from '#services/metadata_sync_service'
+import { SeriesMetadataSyncService } from '#services/series_metadata_sync_service'
 import path from 'path'
 import fs from 'fs/promises'
 
@@ -216,7 +216,7 @@ export default class SeriesController {
         return response.badRequest({ message: 'Series does not have a Sonarr ID' })
       }
 
-      const metadataSyncService = new MetadataSyncService()
+      const metadataSyncService = new SeriesMetadataSyncService()
 
       await metadataSyncService.syncSeries(sonarrId, true)
 

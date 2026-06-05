@@ -1,5 +1,6 @@
 import { HttpContext } from '@adonisjs/core/http'
 import { SonarrService } from '#services/sonarr_service'
+import { RadarrService } from '#services/radarr_service'
 import env from '#start/env'
 
 export default class HealthController {
@@ -35,6 +36,45 @@ export default class HealthController {
    */
   async getSonarrStatus({ response }: HttpContext) {
     const status = SonarrService.getHealthStatus()
+
+    return response.json({
+      healthy: status.healthy,
+      lastCheck: status.lastCheck,
+    })
+  }
+
+  /**
+   * Check Radarr connection health (with cache)
+   */
+  async checkRadarr({ response }: HttpContext) {
+    const status = RadarrService.getHealthStatus()
+
+    return response.json({
+      healthy: status.healthy,
+      lastCheck: status.lastCheck,
+      cached: true,
+    })
+  }
+
+  /**
+   * Force a fresh Radarr health check
+   */
+  async forceRadarrCheck({ response }: HttpContext) {
+    const healthy = await RadarrService.performHealthCheck()
+    const status = RadarrService.getHealthStatus()
+
+    return response.json({
+      healthy: healthy,
+      lastCheck: status.lastCheck,
+      cached: false,
+    })
+  }
+
+  /**
+   * Get current Radarr health status without performing check
+   */
+  async getRadarrStatus({ response }: HttpContext) {
+    const status = RadarrService.getHealthStatus()
 
     return response.json({
       healthy: status.healthy,

@@ -1,9 +1,11 @@
 import Config from '#models/config'
+import Film from '#models/film'
 import RootFolder from '#models/root_folder'
 import Series from '#models/series'
 import { getDownloadQueue } from '#services/download_queue'
 import { logger } from '#services/logger_service'
 import { getSonarrService } from '#services/sonarr_service'
+import { getRadarrService } from '#services/radarr_service'
 import DownloadSuccessEvent from '#events/download_success_event'
 import DownloadErrorEvent from '#events/download_error_event'
 import app from '@adonisjs/core/services/app'
@@ -15,6 +17,7 @@ import path from 'path'
 import string from '@adonisjs/core/helpers/string'
 
 export interface DownloadEpisodeParams {
+  mediaType: 'episode'
   episodeId: number
   seriesId: number
   seasonId: number
@@ -24,6 +27,17 @@ export interface DownloadEpisodeParams {
   episodeTitle: string
   downloadUrl: string
 }
+
+export interface DownloadFilmParams {
+  mediaType: 'film'
+  filmId: number
+  radarrId: number
+  filmTitle: string
+  year: number | null
+  downloadUrl: string
+}
+
+export type DownloadParams = DownloadEpisodeParams | DownloadFilmParams
 
 interface DownloadChunk {
   chunkIndex: number
@@ -59,7 +73,7 @@ export class DownloadEpisodesTask {
   /**
    * Download a single episode using multiple worker threads
    */
-  static async execute(params: DownloadEpisodeParams, queueItemId: string): Promise<void> {
+  static async execute(params: DownloadParams, queueItemId: string): Promise<void> {
     const queue = getDownloadQueue()
     
     try {
@@ -122,42 +136,67 @@ export class DownloadEpisodesTask {
       // Clean up temp files
       await fs.rm(tempDir, { recursive: true, force: true })
       
-      // Copy file to Sonarr folder and trigger rescan
-      await this.copyToSonarrAndRescan(params, outputPath)
+      // Copy file to the *arr folder and trigger rescan/rename
+      if (params.mediaType === 'film') {
+        await this.copyToRadarrAndRescan(params, outputPath)
+        // Clean up merged temp file
+        await fs.rm(outputPath, { force: true }).catch(() => {})
+        await this.renameMovieFile(params)
+      } else {
+        await this.copyToSonarrAndRescan(params, outputPath)
+        // Clean up merged temp file
+        await fs.rm(outputPath, { force: true }).catch(() => {})
+        await this.renameEpisodeFile(params)
+      }
 
-      // Clean up merged temp file
-      await fs.rm(outputPath, { force: true }).catch(() => {})
-
-      await this.renameEpisodeFile(params)  
-      
       // Mark as completed
       queue.completeItem(queueItemId)
-      
+
       // Emit download success event
-      const successEvent = new DownloadSuccessEvent({
-        seriesTitle: params.seriesTitle,
-        seasonNumber: params.seasonNumber,
-        episodeNumber: params.episodeNumber,
-        episodeTitle: params.episodeTitle,
-      })
+      const successEvent = new DownloadSuccessEvent(
+        params.mediaType === 'film'
+          ? { mediaType: 'film', filmTitle: params.filmTitle, year: params.year }
+          : {
+              mediaType: 'episode',
+              seriesTitle: params.seriesTitle,
+              seasonNumber: params.seasonNumber,
+              episodeNumber: params.episodeNumber,
+              episodeTitle: params.episodeTitle,
+            }
+      )
       await emitter.emit(DownloadSuccessEvent, successEvent)
-      
+
     } catch (error) {
       // Mark as failed
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       queue.failItem(queueItemId, errorMessage)
-      console.error(`Download failed for ${params.seriesTitle} S${params.seasonNumber}E${params.episodeNumber}:`, error)
-      
+      console.error(`Download failed for ${this.describeParams(params)}:`, error)
+
       // Emit download error event
-      const errorEvent = new DownloadErrorEvent({
-        seriesTitle: params.seriesTitle,
-        seasonNumber: params.seasonNumber,
-        episodeNumber: params.episodeNumber,
-        episodeTitle: params.episodeTitle,
-        error: errorMessage,
-      })
+      const errorEvent = new DownloadErrorEvent(
+        params.mediaType === 'film'
+          ? { mediaType: 'film', filmTitle: params.filmTitle, year: params.year, error: errorMessage }
+          : {
+              mediaType: 'episode',
+              seriesTitle: params.seriesTitle,
+              seasonNumber: params.seasonNumber,
+              episodeNumber: params.episodeNumber,
+              episodeTitle: params.episodeTitle,
+              error: errorMessage,
+            }
+      )
       await emitter.emit(DownloadErrorEvent, errorEvent)
     }
+  }
+
+  /**
+   * Human-readable label for logging
+   */
+  private static describeParams(params: DownloadParams): string {
+    if (params.mediaType === 'film') {
+      return `${params.filmTitle}${params.year ? ` (${params.year})` : ''}`
+    }
+    return `${params.seriesTitle} S${params.seasonNumber}E${params.episodeNumber}`
   }
   
   /**
@@ -258,7 +297,7 @@ export class DownloadEpisodesTask {
           if (progress % 10 < 1 || progress === 100) {
             completedChunks.add(chunk.chunkIndex)
             const overallProgress = Math.floor((totalDownloaded / totalFileSize) * 100)
-            queue.updateProgress(queueItemId, overallProgress, downloadSpeed)
+            queue.updateProgress(queueItemId, overallProgress, downloadSpeed, totalFileSize)
           }
         })
         
@@ -325,24 +364,29 @@ export class DownloadEpisodesTask {
   }
 
   /**
-   * Map Sonarr path to local path using root folder mappings
+   * Map an *arr path to a local path using root folder mappings for that service
    */
-  private static async mapSonarrPathToLocal(sonarrPath: string): Promise<string> {
-    // Get all root folders with mappings
-    const rootFolders = await RootFolder.query().whereNotNull('mapped_path')
+  private static async mapArrPathToLocal(
+    arrPath: string,
+    service: 'sonarr' | 'radarr'
+  ): Promise<string> {
+    // Get root folders with mappings for the given service
+    const rootFolders = await RootFolder.query()
+      .where('service', service)
+      .whereNotNull('mapped_path')
 
-    // Find the root folder that matches the start of the sonarr path
+    // Find the root folder that matches the start of the arr path
     for (const rootFolder of rootFolders) {
-      if (sonarrPath.startsWith(rootFolder.path)) {
+      if (arrPath.startsWith(rootFolder.path)) {
         // Replace the root folder path with the mapped path
-        const relativePath = sonarrPath.substring(rootFolder.path.length)
+        const relativePath = arrPath.substring(rootFolder.path.length)
         const localPath = path.join(rootFolder.mappedPath!, relativePath)
         return localPath
       }
     }
 
     // If no mapping found, return the original path
-    return sonarrPath
+    return arrPath
   }
 
   /**
@@ -376,7 +420,7 @@ export class DownloadEpisodesTask {
       }
 
       // Map Sonarr path to local path
-      const localSeriesPath = await this.mapSonarrPathToLocal(sonarrSeries.path)
+      const localSeriesPath = await this.mapArrPathToLocal(sonarrSeries.path, 'sonarr')
 
       // Ensure the series folder exists
       await fs.mkdir(localSeriesPath, { recursive: true })
@@ -433,6 +477,99 @@ export class DownloadEpisodesTask {
     } catch (error) {
       logger.error('DownloadTask', 'Impossibile rinominare il file dell\'episodio', error)
       // Don't throw - the download was successful, just the copy/rescan failed
+    }
+  }
+
+  /**
+   * Copy downloaded movie file to the Radarr folder and trigger a rescan
+   */
+  private static async copyToRadarrAndRescan(
+    params: DownloadFilmParams,
+    downloadedFilePath: string
+  ): Promise<void> {
+    try {
+      const film = await Film.query().where('id', params.filmId).first()
+
+      if (!film) {
+        logger.error('DownloadTask', `Film ${params.filmTitle} non trovato`)
+        return
+      }
+
+      if (!film.radarrId) {
+        logger.error('DownloadTask', `Il film ${params.filmTitle} non ha un ID Radarr associato`)
+        return
+      }
+
+      // Get movie details from Radarr
+      const radarrService = getRadarrService()
+      await radarrService.initialize()
+      const movie = await radarrService.getMovieById(film.radarrId)
+
+      if (!movie.path) {
+        logger.error('DownloadTask', `Il film ${params.filmTitle} non ha un percorso configurato in Radarr`)
+        return
+      }
+
+      // Map Radarr path to local path (root folder mappings are path-prefix based)
+      const localMoviePath = await this.mapArrPathToLocal(movie.path, 'radarr')
+
+      // Ensure the movie folder exists
+      await fs.mkdir(localMoviePath, { recursive: true })
+
+      // Format filename for Radarr: "{Title} ({year}).ext"
+      const extension = path.extname(downloadedFilePath)
+      const yearStr = params.year ? ` (${params.year})` : ''
+      const sanitizedTitle = this.sanitizeFilename(params.filmTitle)
+      const radarrFilename = `${sanitizedTitle}${yearStr}${extension}`
+      const destinationPath = path.join(localMoviePath, radarrFilename)
+
+      logger.debug('DownloadTask', `Copia del file nella cartella Radarr in corso...`)
+
+      await fs.copyFile(downloadedFilePath, destinationPath)
+
+      logger.success('DownloadTask', `File copiato con successo`)
+
+      // Trigger Radarr rescan
+      await radarrService.rescanMovie(film.radarrId)
+      logger.success('DownloadTask', `Scansione del film avviata`)
+    } catch (error) {
+      logger.error('DownloadTask', 'Impossibile copiare il file o avviare la scansione', error)
+      // Don't throw - the download was successful, just the copy/rescan failed
+    }
+  }
+
+  /**
+   * Trigger a rename for the movie file via Radarr (if auto-rename is enabled)
+   */
+  private static async renameMovieFile({ filmId, filmTitle }: DownloadFilmParams): Promise<void> {
+    try {
+      const autoRename = await Config.get<boolean>('radarr_auto_rename')
+      if (!autoRename) {
+        return
+      }
+
+      const film = await Film.query().where('id', filmId).first()
+      if (!film?.radarrId) {
+        return
+      }
+
+      const radarrService = getRadarrService()
+      await radarrService.initialize()
+
+      // Give Radarr a moment to register the imported file after the rescan
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+
+      const movie = await radarrService.getMovieById(film.radarrId)
+
+      if (movie.movieFile?.id) {
+        await radarrService.renameMovieFile(movie)
+        logger.success('DownloadTask', `File rinominato: ${filmTitle}`)
+      } else {
+        logger.warning('DownloadTask', `ID del file non trovato per ${filmTitle}, impossibile rinominare`)
+      }
+    } catch (error) {
+      logger.error('DownloadTask', 'Impossibile rinominare il file del film', error)
+      // Don't throw - the download was successful, just the rename failed
     }
   }
 }

@@ -4,8 +4,21 @@ import fs from 'fs/promises'
 import { logger } from './logger_service.js'
 import Config from '#models/config'
 
-export interface QueueItem {
+interface BaseQueueItem {
   id: string
+  downloadUrl: string
+  status: 'pending' | 'downloading' | 'completed' | 'failed'
+  progress: number
+  downloadSpeed?: number // bytes per second
+  totalSize?: number // bytes
+  addedAt: Date
+  startedAt?: Date
+  completedAt?: Date
+  error?: string
+}
+
+export interface EpisodeQueueItem extends BaseQueueItem {
+  mediaType: 'episode'
   seriesId: number
   seasonId: number
   episodeId: number
@@ -13,14 +26,33 @@ export interface QueueItem {
   seasonNumber: number
   episodeNumber: number
   episodeTitle: string
-  downloadUrl: string
-  status: 'pending' | 'downloading' | 'completed' | 'failed'
-  progress: number
-  downloadSpeed?: number // bytes per second
-  addedAt: Date
-  startedAt?: Date
-  completedAt?: Date
-  error?: string
+}
+
+export interface FilmQueueItem extends BaseQueueItem {
+  mediaType: 'film'
+  filmId: number
+  radarrId: number
+  filmTitle: string
+  year: number | null
+}
+
+export type QueueItem = EpisodeQueueItem | FilmQueueItem
+
+/**
+ * Omit that distributes over union members so each branch keeps its own shape
+ */
+type DistributiveOmit<T, K extends keyof any> = T extends any ? Omit<T, K> : never
+
+type NewQueueItem = DistributiveOmit<QueueItem, 'id' | 'status' | 'progress' | 'addedAt'>
+
+/**
+ * Human-readable label for logging/notifications
+ */
+function describeItem(item: QueueItem): string {
+  if (item.mediaType === 'film') {
+    return `${item.filmTitle}${item.year ? ` (${item.year})` : ''}`
+  }
+  return `${item.seriesTitle} S${item.seasonNumber}E${item.episodeNumber}`
 }
 
 export class DownloadQueue extends EventEmitter {
@@ -43,29 +75,39 @@ export class DownloadQueue extends EventEmitter {
   /**
    * Add an item to the queue
    */
-  addToQueue(item: Omit<QueueItem, 'id' | 'status' | 'progress' | 'addedAt'>): string {
-    const id = `${item.seriesId}-${item.seasonId}-${item.episodeId}-${Date.now()}`
-    
+  addToQueue(item: NewQueueItem): string {
+    const id =
+      item.mediaType === 'film'
+        ? `film-${item.filmId}-${Date.now()}`
+        : `${item.seriesId}-${item.seasonId}-${item.episodeId}-${Date.now()}`
+
     // Check if item already exists in queue or is downloading
-    const exists = this.queue.some(
-      (q) =>
+    const exists = this.queue.some((q) => {
+      if (q.status !== 'pending' && q.status !== 'downloading') {
+        return false
+      }
+      if (item.mediaType === 'film') {
+        return q.mediaType === 'film' && q.filmId === item.filmId
+      }
+      return (
+        q.mediaType === 'episode' &&
         q.seriesId === item.seriesId &&
         q.seasonId === item.seasonId &&
-        q.episodeId === item.episodeId &&
-        (q.status === 'pending' || q.status === 'downloading')
-    )
+        q.episodeId === item.episodeId
+      )
+    })
 
     if (exists) {
       throw new Error('Item already in queue')
     }
 
-    const queueItem: QueueItem = {
+    const queueItem = {
       id,
       ...item,
       status: 'pending',
       progress: 0,
       addedAt: new Date(),
-    }
+    } as QueueItem
 
     this.queue.push(queueItem)
     this.emit('item-added', queueItem)
@@ -107,8 +149,8 @@ export class DownloadQueue extends EventEmitter {
     const item = this.activeDownloads.get(id)
     
     if (item) {
-      logger.warning('DownloadQueue', `Annullamento download in corso: ${item.seriesTitle} S${item.seasonNumber}E${item.episodeNumber}`)
-      
+      logger.warning('DownloadQueue', `Annullamento download in corso: ${describeItem(item)}`)
+
       // Signal to the download task that it should stop
       const { DownloadEpisodesTask } = await import('../tasks/download_episodes_task.js')
       DownloadEpisodesTask.cancelDownload(id)
@@ -123,9 +165,9 @@ export class DownloadQueue extends EventEmitter {
       // Remove partial download files
       try {
         const tempDir = app.tmpPath(`downloads/${id}`)
-        
+
         await fs.rm(tempDir, { recursive: true, force: true })
-        logger.success('DownloadQueue', `File temporanei rimossi per: ${item.seriesTitle} S${item.seasonNumber}E${item.episodeNumber}`)
+        logger.success('DownloadQueue', `File temporanei rimossi per: ${describeItem(item)}`)
       } catch (error) {
         logger.error('DownloadQueue', `Errore durante la rimozione dei file temporanei`, error)
       }
@@ -171,13 +213,16 @@ export class DownloadQueue extends EventEmitter {
   /**
    * Update progress for a downloading item
    */
-  updateProgress(id: string, progress: number, downloadSpeed?: number): void {
+  updateProgress(id: string, progress: number, downloadSpeed?: number, totalSize?: number): void {
     const item = this.activeDownloads.get(id)
-    
+
     if (item) {
       item.progress = Math.min(100, Math.max(0, progress))
       if (downloadSpeed !== undefined) {
         item.downloadSpeed = downloadSpeed
+      }
+      if (totalSize !== undefined) {
+        item.totalSize = totalSize
       }
       this.emit('progress-update', item)
     }
@@ -260,22 +305,32 @@ export class DownloadQueue extends EventEmitter {
     try {
       // Dynamic import to avoid circular dependency
       const { DownloadEpisodesTask } = await import('../tasks/download_episodes_task.js')
-      
-      await DownloadEpisodesTask.execute(
-        {
-          episodeId: item.episodeId,
-          seriesId: item.seriesId,
-          seasonId: item.seasonId,
-          seriesTitle: item.seriesTitle,
-          seasonNumber: item.seasonNumber,
-          episodeNumber: item.episodeNumber,
-          episodeTitle: item.episodeTitle,
-          downloadUrl: item.downloadUrl,
-        },
-        item.id
-      )
+
+      const params =
+        item.mediaType === 'film'
+          ? {
+              mediaType: 'film' as const,
+              filmId: item.filmId,
+              radarrId: item.radarrId,
+              filmTitle: item.filmTitle,
+              year: item.year,
+              downloadUrl: item.downloadUrl,
+            }
+          : {
+              mediaType: 'episode' as const,
+              episodeId: item.episodeId,
+              seriesId: item.seriesId,
+              seasonId: item.seasonId,
+              seriesTitle: item.seriesTitle,
+              seasonNumber: item.seasonNumber,
+              episodeNumber: item.episodeNumber,
+              episodeTitle: item.episodeTitle,
+              downloadUrl: item.downloadUrl,
+            }
+
+      await DownloadEpisodesTask.execute(params, item.id)
     } catch (error) {
-      logger.error('DownloadQueue', `Errore durante il download di ${item.seriesTitle} S${item.seasonNumber}E${item.episodeNumber}`, error)
+      logger.error('DownloadQueue', `Errore durante il download di ${describeItem(item)}`, error)
       // The task should have already marked it as failed, but just in case
       if (this.activeDownloads.has(item.id)) {
         this.failItem(item.id, error instanceof Error ? error.message : 'Unknown error')
