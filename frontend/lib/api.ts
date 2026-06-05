@@ -347,12 +347,8 @@ export interface Task {
 }
 
 export async function fetchTasks(serviceType?: ServiceType): Promise<Task[]> {
-  const url = new URL(`${API_BASE_URL}/api/tasks`);
-  if (serviceType) {
-    url.searchParams.append('serviceType', serviceType);
-  }
-  
-  const response = await fetch(url.toString());
+  const query = serviceType ? `?serviceType=${serviceType}` : "";
+  const response = await fetch(`${API_BASE_URL}/api/tasks${query}`);
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw new Error(error.message || "Failed to fetch tasks");
