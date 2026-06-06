@@ -308,6 +308,7 @@ export default function RadarrSettingsPage() {
         await apiUpdateConfig(configKey, value);
 
         const configNames: Partial<Record<keyof Configs, string>> = {
+          radarr_enabled: "Integrazione Radarr",
           radarr_url: "URL Radarr",
           radarr_token: "Token API",
           radarr_auto_rename: "Rinomina Automatica",

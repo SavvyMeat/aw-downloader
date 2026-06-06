@@ -354,6 +354,7 @@ export default function SonarrSettingsPage() {
         await apiUpdateConfig(configKey, value);
 
         const configNames: Record<keyof Configs, string> = {
+          sonarr_enabled: "Integrazione Sonarr",
           sonarr_url: "URL Sonarr",
           sonarr_token: "Token API",
           sonarr_filter_anime_only: "Filtra Solo Anime",
