@@ -136,17 +136,21 @@ export class DownloadEpisodesTask {
       // Clean up temp files
       await fs.rm(tempDir, { recursive: true, force: true })
       
-      // Copy file to the *arr folder and trigger rescan/rename
+      // Copy file to the *arr folder, wait for the rescan, then update/rename the imported file
       if (params.mediaType === 'film') {
-        await this.copyToRadarrAndRescan(params, outputPath)
+        const scanned = await this.copyToRadarrAndRescan(params, outputPath)
         // Clean up merged temp file
         await fs.rm(outputPath, { force: true }).catch(() => {})
-        await this.renameMovieFile(params)
+        if (scanned) {
+          await this.updateMovieFile(params)
+        }
       } else {
-        await this.copyToSonarrAndRescan(params, outputPath)
+        const scanned = await this.copyToSonarrAndRescan(params, outputPath)
         // Clean up merged temp file
         await fs.rm(outputPath, { force: true }).catch(() => {})
-        await this.renameEpisodeFile(params)
+        if (scanned) {
+          await this.updateEpisodeFile(params)
+        }
       }
 
       // Mark as completed
@@ -364,6 +368,20 @@ export class DownloadEpisodesTask {
   }
 
   /**
+   * Get the release group to set on imported files for a service, or null when disabled
+   */
+  private static async getReleaseGroup(service: 'sonarr' | 'radarr'): Promise<string | null> {
+    const enabled = (await Config.get<boolean>(`${service}_release_group_enabled`)) ?? false
+    if (!enabled) {
+      return null
+    }
+    const releaseGroup = String((await Config.get<string>(`${service}_release_group`)) ?? '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    return releaseGroup || 'AnimeWorld'
+  }
+
+  /**
    * Map an *arr path to a local path using root folder mappings for that service
    */
   private static async mapArrPathToLocal(
@@ -392,7 +410,10 @@ export class DownloadEpisodesTask {
   /**
    * Copy downloaded file to Sonarr folder and trigger rescan
    */
-  private static async copyToSonarrAndRescan(params: DownloadEpisodeParams, downloadedFilePath: string): Promise<void> {
+  private static async copyToSonarrAndRescan(
+    params: DownloadEpisodeParams,
+    downloadedFilePath: string
+  ): Promise<boolean> {
     try {
       // Get series info from local database
       const series = await Series.query()
@@ -401,12 +422,12 @@ export class DownloadEpisodesTask {
 
       if (!series) {
         logger.error('DownloadTask', `Serie ${params.seriesTitle} non trovata`)
-        return
+        return false
       }
 
       if (!series.sonarrId) {
         logger.error('DownloadTask', `La serie ${params.seriesTitle} non ha un ID Sonarr associato`)
-        return
+        return false
       }
 
       // Get series details from Sonarr (with cache)
@@ -416,7 +437,7 @@ export class DownloadEpisodesTask {
 
       if (!sonarrSeries.path) {
         logger.error('DownloadTask', `La serie ${params.seriesTitle} non ha un percorso configurato in Sonarr`)
-        return
+        return false
       }
 
       // Map Sonarr path to local path
@@ -440,43 +461,70 @@ export class DownloadEpisodesTask {
 
       logger.success('DownloadTask', `File copiato con successo`)
 
-      // Trigger Sonarr rescan
-      await sonarrService.rescanSeries(series.sonarrId)
-      logger.success('DownloadTask', `Scansione della serie avviata`)
+      // Trigger Sonarr rescan and wait for it: the scan imports the new file
+      const commandId = await sonarrService.rescanSeries(series.sonarrId)
+      logger.debug('DownloadTask', `Scansione della serie avviata, in attesa del termine...`)
 
+      const status = await sonarrService.waitForCommand(commandId).catch((error) => {
+        logger.error('DownloadTask', 'Impossibile verificare lo stato della scansione', error)
+        return 'unknown'
+      })
+      if (status !== 'completed') {
+        logger.warning('DownloadTask', `Scansione della serie non completata (status: ${status})`)
+      }
+      return true
     } catch (error) {
       logger.error('DownloadTask', 'Impossibile copiare il file o avviare la scansione', error)
       // Don't throw - the download was successful, just the copy/rescan failed
+      return false
     }
   }
 
   /**
-   * Copy downloaded file to Sonarr folder and trigger rescan
+   * Once Sonarr has imported the file: set the release group (if enabled)
+   * and trigger the rename (if auto-rename is enabled)
    */
-  private static async renameEpisodeFile({seriesTitle, episodeId, episodeNumber, seasonNumber}: DownloadEpisodeParams): Promise<void> {
+  private static async updateEpisodeFile({
+    seriesTitle,
+    episodeId,
+    episodeNumber,
+    seasonNumber,
+  }: DownloadEpisodeParams): Promise<void> {
+    const label = `${seriesTitle} S${seasonNumber}E${episodeNumber}`
+
     try {
-      // Check if auto-rename is enabled
-      const autoRename = await Config.get<boolean>('sonarr_auto_rename')
-      if (autoRename) {
+      const sonarrService = getSonarrService()
+      await sonarrService.initialize()
 
-        const sonarrService = getSonarrService()
-        await sonarrService.initialize()
+      const episode = await sonarrService.getEpisode(episodeId)
 
-        await new Promise(resolve => setTimeout(resolve, 2000));
+      if (!episode.episodeFileId) {
+        logger.warning(
+          'DownloadTask',
+          `Sonarr non ha importato il file di ${label}, impossibile aggiornarlo`
+        )
+        return
+      }
 
-        const episode = await sonarrService.getEpisode(episodeId)
-        
-        if (episode.episodeFileId) {
-          await sonarrService.renameEpisodeFile(episode)
-          logger.success('DownloadTask', `File rinominato: ${seriesTitle} S${seasonNumber}E${episodeNumber}`)
-        } else {
-          logger.warning('DownloadTask', `ID del file non trovato per ${seriesTitle} S${seasonNumber}E${episodeNumber}, impossibile rinominare`)
+      // Set before renaming, so that the {Release Group} naming token can use it
+      const releaseGroup = await this.getReleaseGroup('sonarr')
+      if (releaseGroup) {
+        try {
+          await sonarrService.editEpisodeFile(episode.episodeFileId, { releaseGroup })
+          logger.success('DownloadTask', `Informazioni ${label} aggiornate`)
+        } catch (error) {
+          logger.error('DownloadTask', `Impossibile aggiornare le informazioni di ${label}`, error)
         }
       }
 
+      const autoRename = await Config.get<boolean>('sonarr_auto_rename')
+      if (autoRename) {
+        await sonarrService.renameEpisodeFile(episode)
+        logger.success('DownloadTask', `File rinominato: ${label}`)
+      }
     } catch (error) {
-      logger.error('DownloadTask', 'Impossibile rinominare il file dell\'episodio', error)
-      // Don't throw - the download was successful, just the copy/rescan failed
+      logger.error('DownloadTask', "Impossibile aggiornare il file dell'episodio", error)
+      // Don't throw - the download was successful, just the update/rename failed
     }
   }
 
@@ -486,18 +534,18 @@ export class DownloadEpisodesTask {
   private static async copyToRadarrAndRescan(
     params: DownloadFilmParams,
     downloadedFilePath: string
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       const film = await Film.query().where('id', params.filmId).first()
 
       if (!film) {
         logger.error('DownloadTask', `Film ${params.filmTitle} non trovato`)
-        return
+        return false
       }
 
       if (!film.radarrId) {
         logger.error('DownloadTask', `Il film ${params.filmTitle} non ha un ID Radarr associato`)
-        return
+        return false
       }
 
       // Get movie details from Radarr
@@ -507,7 +555,7 @@ export class DownloadEpisodesTask {
 
       if (!movie.path) {
         logger.error('DownloadTask', `Il film ${params.filmTitle} non ha un percorso configurato in Radarr`)
-        return
+        return false
       }
 
       // Map Radarr path to local path (root folder mappings are path-prefix based)
@@ -529,25 +577,31 @@ export class DownloadEpisodesTask {
 
       logger.success('DownloadTask', `File copiato con successo`)
 
-      // Trigger Radarr rescan
-      await radarrService.rescanMovie(film.radarrId)
-      logger.success('DownloadTask', `Scansione del film avviata`)
+      // Trigger Radarr rescan and wait for it: the scan imports the new file
+      const commandId = await radarrService.rescanMovie(film.radarrId)
+      logger.debug('DownloadTask', `Scansione del film avviata, in attesa del termine...`)
+
+      const status = await radarrService.waitForCommand(commandId).catch((error) => {
+        logger.error('DownloadTask', 'Impossibile verificare lo stato della scansione', error)
+        return 'unknown'
+      })
+      if (status !== 'completed') {
+        logger.warning('DownloadTask', `Scansione del film non completata (status: ${status})`)
+      }
+      return true
     } catch (error) {
       logger.error('DownloadTask', 'Impossibile copiare il file o avviare la scansione', error)
       // Don't throw - the download was successful, just the copy/rescan failed
+      return false
     }
   }
 
   /**
-   * Trigger a rename for the movie file via Radarr (if auto-rename is enabled)
+   * Once Radarr has imported the file: set the release group (if enabled)
+   * and trigger the rename (if auto-rename is enabled)
    */
-  private static async renameMovieFile({ filmId, filmTitle }: DownloadFilmParams): Promise<void> {
+  private static async updateMovieFile({ filmId, filmTitle }: DownloadFilmParams): Promise<void> {
     try {
-      const autoRename = await Config.get<boolean>('radarr_auto_rename')
-      if (!autoRename) {
-        return
-      }
-
       const film = await Film.query().where('id', filmId).first()
       if (!film?.radarrId) {
         return
@@ -556,20 +610,39 @@ export class DownloadEpisodesTask {
       const radarrService = getRadarrService()
       await radarrService.initialize()
 
-      // Give Radarr a moment to register the imported file after the rescan
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-
       const movie = await radarrService.getMovieById(film.radarrId)
 
-      if (movie.movieFile?.id) {
+      if (!movie.movieFile?.id) {
+        logger.warning(
+          'DownloadTask',
+          `Radarr non ha importato il file di ${filmTitle}, impossibile aggiornarlo`
+        )
+        return
+      }
+
+      // Set before renaming, so that the {Release Group} naming token can use it
+      const releaseGroup = await this.getReleaseGroup('radarr')
+      if (releaseGroup) {
+        try {
+          await radarrService.editMovieFile(movie.movieFile.id, { releaseGroup })
+          logger.success('DownloadTask', `Informazioni ${filmTitle} aggiornate`)
+        } catch (error) {
+          logger.error(
+            'DownloadTask',
+            `Impossibile aggiornare le informazioni di ${filmTitle}`,
+            error
+          )
+        }
+      }
+
+      const autoRename = await Config.get<boolean>('radarr_auto_rename')
+      if (autoRename) {
         await radarrService.renameMovieFile(movie)
         logger.success('DownloadTask', `File rinominato: ${filmTitle}`)
-      } else {
-        logger.warning('DownloadTask', `ID del file non trovato per ${filmTitle}, impossibile rinominare`)
       }
     } catch (error) {
-      logger.error('DownloadTask', 'Impossibile rinominare il file del film', error)
-      // Don't throw - the download was successful, just the rename failed
+      logger.error('DownloadTask', 'Impossibile aggiornare il file del film', error)
+      // Don't throw - the download was successful, just the update/rename failed
     }
   }
 }

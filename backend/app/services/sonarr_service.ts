@@ -3,6 +3,7 @@ import Config from '#models/config'
 import { logger } from '#services/logger_service'
 import { DateTime } from 'luxon'
 import cache from '@adonisjs/cache/services/main'
+import { waitForCommand, type WaitForCommandOptions } from '../helpers/arr_command.js'
 
 export interface SonarrStatistics {
   episodeCount: number
@@ -45,6 +46,41 @@ export interface SonarrEpisode {
   monitored: boolean
   hasFile: boolean
   episodeFileId?: number
+}
+
+export interface SonarrLanguage {
+  id: number
+  name?: string
+}
+
+export interface SonarrQualityModel {
+  quality: {
+    id: number
+    name?: string
+    source?: string
+    resolution?: number
+  }
+  revision: {
+    version: number
+    real: number
+    isRepack: boolean
+  }
+}
+
+export type SonarrReleaseType = 'unknown' | 'singleEpisode' | 'multiEpisode' | 'seasonPack'
+
+/**
+ * Episode file fields that Sonarr allows to change (PUT /api/v3/episodefile/bulk).
+ * Every field is optional: only the ones that are set are changed.
+ */
+export interface SonarrEpisodeFileChanges {
+  releaseGroup?: string
+  languages?: SonarrLanguage[]
+  quality?: SonarrQualityModel
+  /** Applied by Sonarr only if it looks like a scene release title */
+  sceneName?: string
+  indexerFlags?: number
+  releaseType?: SonarrReleaseType
 }
 
 export interface SonarrWantedRecord {
@@ -482,13 +518,14 @@ export class SonarrService {
   /**
    * Trigger a rescan/refresh for a specific series
    * This tells Sonarr to scan the series folder for new files
+   * @returns The id of the queued command, to follow it with waitForCommand
    */
-  async rescanSeries(seriesId: number): Promise<void> {
+  async rescanSeries(seriesId: number): Promise<number> {
     this.ensureInitialized()
     this.ensureHealthy()
 
     try {
-      await axios.post(
+      const response = await axios.post<{ id: number }>(
         `${this.sonarrUrl}/api/v3/command`,
         {
           name: 'RescanSeries',
@@ -500,6 +537,7 @@ export class SonarrService {
           },
         }
       )
+      return response.data.id
     } catch (error) {
       logger.error(
         'SonarrService',
@@ -508,6 +546,59 @@ export class SonarrService {
       )
       throw new Error(
         `Failed to rescan series: ${error instanceof Error ? error.message : 'Unknown error'}`
+      )
+    }
+  }
+
+  /**
+   * Wait until a Sonarr command reaches a final state
+   * @returns The final status ("completed", "failed", ...) or "timeout"
+   */
+  async waitForCommand(commandId: number, options?: WaitForCommandOptions): Promise<string> {
+    this.ensureInitialized()
+
+    return waitForCommand(async () => {
+      const response = await axios.get<{ status: string }>(
+        `${this.sonarrUrl}/api/v3/command/${commandId}`,
+        {
+          headers: {
+            'X-Api-Key': this.sonarrToken!,
+          },
+        }
+      )
+      return response.data.status
+    }, options)
+  }
+
+  /**
+   * Edit an episode file, without renaming or moving it.
+   * Sonarr's bulk endpoint ignores the fields that are not sent, so everything
+   * not listed in `changes` (e.g. the detected quality) is kept.
+   */
+  async editEpisodeFile(episodeFileId: number, changes: SonarrEpisodeFileChanges): Promise<void> {
+    this.ensureInitialized()
+    this.ensureHealthy()
+
+    // Request body with the API field names; undefined fields are left out by JSON.stringify
+    const episodeFile = {
+      id: episodeFileId,
+      releaseGroup: changes.releaseGroup,
+      languages: changes.languages,
+      quality: changes.quality,
+      sceneName: changes.sceneName,
+      indexerFlags: changes.indexerFlags,
+      releaseType: changes.releaseType,
+    }
+
+    try {
+      await axios.put(`${this.sonarrUrl}/api/v3/episodefile/bulk`, [episodeFile], {
+        headers: {
+          'X-Api-Key': this.sonarrToken!,
+        },
+      })
+    } catch (error) {
+      throw new Error(
+        `Failed to edit episode file: ${error instanceof Error ? error.message : 'Unknown error'}`
       )
     }
   }

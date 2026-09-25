@@ -3,6 +3,7 @@ import Config from '#models/config'
 import { logger } from '#services/logger_service'
 import { DateTime } from 'luxon'
 import cache from '@adonisjs/cache/services/main'
+import { waitForCommand, type WaitForCommandOptions } from '../helpers/arr_command.js'
 
 export interface RadarrStatistics {
   movieFileCount: number
@@ -43,6 +44,40 @@ export interface RadarrMovie {
   digitalRelease?: string
   minimumAvailability: string
   isAvailable: boolean
+}
+
+export interface RadarrLanguage {
+  id: number
+  name?: string
+}
+
+export interface RadarrQualityModel {
+  quality: {
+    id: number
+    name?: string
+    source?: string
+    resolution?: number
+  }
+  revision: {
+    version: number
+    real: number
+    isRepack: boolean
+  }
+}
+
+/**
+ * Movie file fields that Radarr allows to change (PUT /api/v3/moviefile/bulk).
+ * Every field is optional: only the ones that are set are changed.
+ */
+export interface RadarrMovieFileChanges {
+  releaseGroup?: string
+  /** Radarr drops the "Any" and "Original" languages */
+  languages?: RadarrLanguage[]
+  quality?: RadarrQualityModel
+  /** Applied by Radarr only if it looks like a scene release title */
+  sceneName?: string
+  edition?: string
+  indexerFlags?: number
 }
 
 export interface RadarrWantedRecord {
@@ -381,13 +416,14 @@ export class RadarrService {
   /**
    * Trigger a rescan/refresh for a specific movie
    * This tells Radarr to scan the movie folder for new files
+   * @returns The id of the queued command, to follow it with waitForCommand
    */
-  async rescanMovie(movieId: number): Promise<void> {
+  async rescanMovie(movieId: number): Promise<number> {
     this.ensureInitialized()
     this.ensureHealthy()
 
     try {
-      await axios.post(
+      const response = await axios.post<{ id: number }>(
         `${this.radarrUrl}/api/v3/command`,
         {
           name: 'RescanMovie',
@@ -399,10 +435,64 @@ export class RadarrService {
           },
         }
       )
+      return response.data.id
     } catch (error) {
       logger.error('RadarrService', `Impossibile avviare la scansione del film`, error)
       throw new Error(
         `Failed to rescan movie: ${error instanceof Error ? error.message : 'Unknown error'}`
+      )
+    }
+  }
+
+  /**
+   * Wait until a Radarr command reaches a final state
+   * @returns The final status ("completed", "failed", ...) or "timeout"
+   */
+  async waitForCommand(commandId: number, options?: WaitForCommandOptions): Promise<string> {
+    this.ensureInitialized()
+
+    return waitForCommand(async () => {
+      const response = await axios.get<{ status: string }>(
+        `${this.radarrUrl}/api/v3/command/${commandId}`,
+        {
+          headers: {
+            'X-Api-Key': this.radarrToken!,
+          },
+        }
+      )
+      return response.data.status
+    }, options)
+  }
+
+  /**
+   * Edit a movie file, without renaming or moving it.
+   * Radarr's bulk endpoint ignores the fields that are not sent, so everything
+   * not listed in `changes` (e.g. the detected quality) is kept.
+   */
+  async editMovieFile(movieFileId: number, changes: RadarrMovieFileChanges): Promise<void> {
+    this.ensureInitialized()
+    this.ensureHealthy()
+
+    // Request body with the API field names; undefined fields are left out by JSON.stringify
+    const movieFile = {
+      id: movieFileId,
+      releaseGroup: changes.releaseGroup,
+      languages: changes.languages,
+      quality: changes.quality,
+      sceneName: changes.sceneName,
+      edition: changes.edition,
+      indexerFlags: changes.indexerFlags,
+    }
+
+    try {
+      await axios.put(`${this.radarrUrl}/api/v3/moviefile/bulk`, [movieFile], {
+        headers: {
+          'X-Api-Key': this.radarrToken!,
+        },
+      })
+    } catch (error) {
+      throw new Error(
+        `Failed to edit movie file: ${error instanceof Error ? error.message : 'Unknown error'}`
       )
     }
   }

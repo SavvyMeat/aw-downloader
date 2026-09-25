@@ -74,6 +74,8 @@ interface Configs {
   sonarr_token?: string;
   sonarr_filter_anime_only?: boolean;
   sonarr_auto_rename?: boolean;
+  sonarr_release_group_enabled?: boolean;
+  sonarr_release_group?: string;
   sonarr_tags_mode?: string;
   sonarr_tags?: Array<{ label: string; value: string }>;
 }
@@ -84,6 +86,8 @@ interface ConfigInputs {
   sonarr_token: string;
   sonarr_filter_anime_only: boolean;
   sonarr_auto_rename: boolean;
+  sonarr_release_group_enabled: boolean;
+  sonarr_release_group: string;
   sonarr_tags_mode: string;
   sonarr_tags: string[];
 }
@@ -99,6 +103,8 @@ export default function SonarrSettingsPage() {
     sonarr_token: "",
     sonarr_filter_anime_only: true,
     sonarr_auto_rename: false,
+    sonarr_release_group_enabled: false,
+    sonarr_release_group: "AnimeWorld",
     sonarr_tags_mode: "blacklist",
     sonarr_tags: [],
   });
@@ -206,6 +212,8 @@ export default function SonarrSettingsPage() {
         sonarr_token: "",
         sonarr_filter_anime_only: typeof data.sonarr_filter_anime_only === 'boolean' ? data.sonarr_filter_anime_only : data.sonarr_filter_anime_only !== 'false',
         sonarr_auto_rename: typeof data.sonarr_auto_rename === 'boolean' ? data.sonarr_auto_rename : data.sonarr_auto_rename === 'true',
+        sonarr_release_group_enabled: typeof data.sonarr_release_group_enabled === 'boolean' ? data.sonarr_release_group_enabled : data.sonarr_release_group_enabled === 'true',
+        sonarr_release_group: data.sonarr_release_group || "AnimeWorld",
         sonarr_tags_mode: data.sonarr_tags_mode || "blacklist",
         sonarr_tags: parsedTags.map((t: any) => String(t.value || t)),
       });
@@ -310,6 +318,19 @@ export default function SonarrSettingsPage() {
     }
   };
 
+  const handleReleaseGroupToggle = async (checked: boolean) => {
+    setConfigInputs((prev) => ({ ...prev, sonarr_release_group_enabled: checked }));
+
+    try {
+      await apiUpdateConfig("sonarr_release_group_enabled", checked);
+      setConfigs((prev) => ({ ...prev, sonarr_release_group_enabled: checked }));
+      toast.success(checked ? "Release group attivato" : "Release group disattivato");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Errore salvataggio impostazione");
+      setConfigInputs((prev) => ({ ...prev, sonarr_release_group_enabled: !checked }));
+    }
+  };
+
   const handleTagModeChange = async (value: string) => {
     setConfigInputs((prev) => ({ ...prev, sonarr_tags_mode: value }));
 
@@ -359,6 +380,8 @@ export default function SonarrSettingsPage() {
           sonarr_token: "Token API",
           sonarr_filter_anime_only: "Filtra Solo Anime",
           sonarr_auto_rename: "Rinomina Automatica",
+          sonarr_release_group_enabled: "Release Group",
+          sonarr_release_group: "Release Group",
           sonarr_tags_mode: "Modalità Tag",
           sonarr_tags: "Tag",
         };
@@ -550,6 +573,63 @@ export default function SonarrSettingsPage() {
                   checked={configInputs.sonarr_auto_rename}
                   onCheckedChange={handleAutoRenameToggle}
                 />
+              </div>
+              <div className="sm:hidden border-t my-4" />
+
+              {/* Release Group */}
+              <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between space-y-3 sm:space-y-0 sm:space-x-4">
+                  <div className="space-y-1 flex-1">
+                    <Label htmlFor="release-group-enabled" className="cursor-pointer">
+                      Release group
+                    </Label>
+                    <p className="text-xs sm:text-sm text-muted-foreground">
+                      Imposta il release group sui file importati da Sonarr.
+                    </p>
+                  </div>
+                  <Switch
+                    id="release-group-enabled"
+                    checked={configInputs.sonarr_release_group_enabled}
+                    onCheckedChange={handleReleaseGroupToggle}
+                  />
+                </div>
+                {configInputs.sonarr_release_group_enabled && (
+                  <>
+                    <div className="flex w-full items-center gap-2">
+                      <Input
+                        id="release-group"
+                        type="text"
+                        value={configInputs.sonarr_release_group}
+                        onChange={(e) => handleConfigChange("sonarr_release_group", e.target.value)}
+                        placeholder="AnimeWorld"
+                      />
+                      <Button
+                        size="sm"
+                        onClick={() => handleSaveConfig("sonarr_release_group")}
+                        disabled={
+                          (isSavingConfig && savingConfigKey === "sonarr_release_group") ||
+                          !configInputs.sonarr_release_group.trim() ||
+                          configInputs.sonarr_release_group === (configs.sonarr_release_group || "AnimeWorld")
+                        }
+                      >
+                        {isSavingConfig && savingConfigKey === "sonarr_release_group" ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Salvataggio...
+                          </>
+                        ) : (
+                          <>
+                            <Save className="mr-2 h-4 w-4" />
+                            Salva
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                    <p className="text-xs sm:text-sm text-muted-foreground">
+                      Il release group viene salvato in Sonarr dopo l&apos;importazione.
+                    </p>
+                  </>
+                )}
               </div>
               <div className="sm:hidden border-t my-4" />
 

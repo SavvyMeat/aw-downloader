@@ -66,6 +66,8 @@ interface Configs {
   radarr_url?: string;
   radarr_token?: string;
   radarr_auto_rename?: boolean;
+  radarr_release_group_enabled?: boolean;
+  radarr_release_group?: string;
   radarr_tags_mode?: string;
   radarr_tags?: Array<{ label: string; value: string }>;
 }
@@ -75,6 +77,8 @@ interface ConfigInputs {
   radarr_url: string;
   radarr_token: string;
   radarr_auto_rename: boolean;
+  radarr_release_group_enabled: boolean;
+  radarr_release_group: string;
   radarr_tags_mode: string;
   radarr_tags: string[];
 }
@@ -89,6 +93,8 @@ export default function RadarrSettingsPage() {
     radarr_url: "",
     radarr_token: "",
     radarr_auto_rename: false,
+    radarr_release_group_enabled: false,
+    radarr_release_group: "AnimeWorld",
     radarr_tags_mode: "blacklist",
     radarr_tags: [],
   });
@@ -176,6 +182,8 @@ export default function RadarrSettingsPage() {
         radarr_url: data.radarr_url || "",
         radarr_token: "",
         radarr_auto_rename: typeof data.radarr_auto_rename === "boolean" ? data.radarr_auto_rename : data.radarr_auto_rename === "true",
+        radarr_release_group_enabled: typeof data.radarr_release_group_enabled === "boolean" ? data.radarr_release_group_enabled : data.radarr_release_group_enabled === "true",
+        radarr_release_group: data.radarr_release_group || "AnimeWorld",
         radarr_tags_mode: data.radarr_tags_mode || "blacklist",
         radarr_tags: parsedTags.map((t: any) => String(t.value || t)),
       });
@@ -266,6 +274,19 @@ export default function RadarrSettingsPage() {
     }
   };
 
+  const handleReleaseGroupToggle = async (checked: boolean) => {
+    setConfigInputs((prev) => ({ ...prev, radarr_release_group_enabled: checked }));
+
+    try {
+      await apiUpdateConfig("radarr_release_group_enabled", checked);
+      setConfigs((prev) => ({ ...prev, radarr_release_group_enabled: checked }));
+      toast.success(checked ? "Release group attivato" : "Release group disattivato");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Errore salvataggio impostazione");
+      setConfigInputs((prev) => ({ ...prev, radarr_release_group_enabled: !checked }));
+    }
+  };
+
   const handleTagModeChange = async (value: string) => {
     setConfigInputs((prev) => ({ ...prev, radarr_tags_mode: value }));
     try {
@@ -312,6 +333,8 @@ export default function RadarrSettingsPage() {
           radarr_url: "URL Radarr",
           radarr_token: "Token API",
           radarr_auto_rename: "Rinomina Automatica",
+          radarr_release_group_enabled: "Release Group",
+          radarr_release_group: "Release Group",
           radarr_tags_mode: "Modalità Tag",
           radarr_tags: "Tag",
         };
@@ -484,6 +507,63 @@ export default function RadarrSettingsPage() {
                   checked={configInputs.radarr_auto_rename}
                   onCheckedChange={handleAutoRenameToggle}
                 />
+              </div>
+              <div className="sm:hidden border-t my-4" />
+
+              {/* Release Group */}
+              <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between space-y-3 sm:space-y-0 sm:space-x-4">
+                  <div className="space-y-1 flex-1">
+                    <Label htmlFor="release-group-enabled" className="cursor-pointer">
+                      Release group
+                    </Label>
+                    <p className="text-xs sm:text-sm text-muted-foreground">
+                      Imposta il release group sui file importati da Radarr.
+                    </p>
+                  </div>
+                  <Switch
+                    id="release-group-enabled"
+                    checked={configInputs.radarr_release_group_enabled}
+                    onCheckedChange={handleReleaseGroupToggle}
+                  />
+                </div>
+                {configInputs.radarr_release_group_enabled && (
+                  <>
+                    <div className="flex w-full items-center gap-2">
+                      <Input
+                        id="release-group"
+                        type="text"
+                        value={configInputs.radarr_release_group}
+                        onChange={(e) => handleConfigChange("radarr_release_group", e.target.value)}
+                        placeholder="AnimeWorld"
+                      />
+                      <Button
+                        size="sm"
+                        onClick={() => handleSaveConfig("radarr_release_group")}
+                        disabled={
+                          (isSavingConfig && savingConfigKey === "radarr_release_group") ||
+                          !configInputs.radarr_release_group.trim() ||
+                          configInputs.radarr_release_group === (configs.radarr_release_group || "AnimeWorld")
+                        }
+                      >
+                        {isSavingConfig && savingConfigKey === "radarr_release_group" ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Salvataggio...
+                          </>
+                        ) : (
+                          <>
+                            <Save className="mr-2 h-4 w-4" />
+                            Salva
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                    <p className="text-xs sm:text-sm text-muted-foreground">
+                      Il release group viene salvato in Radarr dopo l&apos;importazione.
+                    </p>
+                  </>
+                )}
               </div>
               <div className="sm:hidden border-t my-4" />
 
