@@ -1,0 +1,157 @@
+# Sandbox: an environment separate from the real AW instance, to try things out manually.
+# Sonarr and Radarr pinned to the versions in use, plus the local build of AW Downloader.
+#
+#   docker compose -f compose.sandbox.yaml up -d --build --wait   # start everything
+#   docker compose -f compose.sandbox.yaml run --rm tests         # optional: configure + run the automated tests
+#   docker compose -f compose.sandbox.yaml down -v                # stop and wipe all data
+#
+# Notes:
+# - The API keys and APP_KEY below are fixed values for this throwaway environment only.
+# - Sonarr, Radarr and AW mount the same volume at /data/media: the paths reported by
+#   Sonarr/Radarr are valid inside AW too, so no root folder mapping is needed.
+# - AnimeWorld is the real one (searches and download links), but by default every video file
+#   AW downloads is replaced by a short generated video served by "fixtures"
+#   (sandbox/hooks/redirect-downloads.mjs). To download the real files:
+#     SANDBOX_FAKE_DOWNLOADS=false docker compose -f compose.sandbox.yaml up -d --wait
+#   Internet is needed anyway (AnimeWorld, Sonarr/Radarr metadata, AniList).
+# - Web UIs (bound to localhost): Sonarr :18989, Radarr :17878, AW :16547.
+
+name: aw-sandbox
+
+x-sonarr-api-key: &sonarr-api-key sandbox-sonarr-api-key-000000000
+x-radarr-api-key: &radarr-api-key sandbox-radarr-api-key-000000000
+
+x-arr-environment: &arr-environment
+  PUID: "1000" # same uid as the "node" user running AW, so both can write the media volume
+  PGID: "1000"
+  TZ: Etc/UTC
+
+services:
+  media-init:
+    image: busybox:1.38.0
+    command: sh -c "mkdir -p /data/media/anime /data/media/movies && chown -R 1000:1000 /data/media"
+    volumes:
+      - media:/data/media
+
+  fixtures-init:
+    image: lscr.io/linuxserver/ffmpeg:9.0-cli-ls83
+    command: >-
+      -y -loglevel error
+      -f lavfi -i testsrc=duration=10:size=1280x720:rate=24
+      -f lavfi -i sine=frequency=440:duration=10
+      -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -shortest
+      /fixtures/episode.mp4
+    volumes:
+      - fixtures:/fixtures
+
+  fixtures:
+    image: nginx:1.30.5-alpine-slim
+    volumes:
+      - fixtures:/usr/share/nginx/html:ro
+    depends_on:
+      fixtures-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/episode.mp4"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:4.0.20.3014-ls325
+    environment:
+      <<: *arr-environment
+      SONARR__AUTH__APIKEY: *sonarr-api-key
+      SONARR__AUTH__METHOD: External
+    volumes:
+      - sonarr-config:/config
+      - media:/data/media
+    ports:
+      - "127.0.0.1:18989:8989"
+    depends_on:
+      media-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://127.0.0.1:8989/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:6.4.4.10685-ls317
+    environment:
+      <<: *arr-environment
+      RADARR__AUTH__APIKEY: *radarr-api-key
+      RADARR__AUTH__METHOD: External
+    volumes:
+      - radarr-config:/config
+      - media:/data/media
+    ports:
+      - "127.0.0.1:17878:7878"
+    depends_on:
+      media-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://127.0.0.1:7878/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  aw-downloader:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    image: aw-downloader:sandbox
+    environment:
+      APP_KEY: BVsnAtvE_ijMmDZjGz4U0x8V5neBTdXD
+      LOG_LEVEL: debug
+      SANDBOX_FAKE_DOWNLOADS: ${SANDBOX_FAKE_DOWNLOADS:-true}
+      SANDBOX_FAKE_DOWNLOAD_URL: http://fixtures/episode.mp4
+      NODE_OPTIONS: --import=/sandbox-hooks/redirect-downloads.mjs
+    volumes:
+      - aw-storage:/app/storage
+      - media:/data/media
+      - ./sandbox/hooks:/sandbox-hooks:ro
+    ports:
+      - "127.0.0.1:16547:6547"
+    depends_on:
+      sonarr:
+        condition: service_healthy
+      radarr:
+        condition: service_healthy
+      fixtures:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:6547/api/health/version"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  # Optional automated tests: configure the stack and run sandbox/tests/*.test.mjs
+  tests:
+    image: node:20-alpine
+    profiles: ["tests"]
+    working_dir: /tests
+    command: ["node", "run.mjs"]
+    environment:
+      AW_URL: http://aw-downloader:6547
+      SONARR_URL: http://sonarr:8989
+      SONARR_API_KEY: *sonarr-api-key
+      RADARR_URL: http://radarr:7878
+      RADARR_API_KEY: *radarr-api-key
+      SANDBOX_FAKE_DOWNLOADS: ${SANDBOX_FAKE_DOWNLOADS:-true}
+    volumes:
+      - ./sandbox/tests:/tests:ro
+    depends_on:
+      aw-downloader:
+        condition: service_healthy
+
+volumes:
+  media:
+  fixtures:
+  sonarr-config:
+  radarr-config:
+  aw-storage:

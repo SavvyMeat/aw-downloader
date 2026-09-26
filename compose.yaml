@@ -12,5 +12,5 @@ services:
       ## TV Shows folders
       - ./tvseries:/data
     environment:
-      - APP_KEY=
+      - APP_KEY=${APP_KEY:?Missing APP_KEY}
     restart: unless-stopped

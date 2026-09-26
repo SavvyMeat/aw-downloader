@@ -30,7 +30,16 @@ npm run lint   # ESLint
 docker compose up --build   # Build and run full stack
 ```
 
-The entrypoint auto-runs database migrations before starting. To generate an APP_KEY: `docker run ... keygen`.
+The entrypoint auto-runs database migrations before starting. `compose.yaml` reads `APP_KEY` from a `.env` file next to it (gitignored); generate a key with `openssl rand -base64 24` or `docker run ... keygen`.
+
+### Sandbox environment
+A stack separate from the real AW instance, for manual testing: Sonarr + Radarr (pinned to the versions in use) + the local AW build. Web UIs on localhost: Sonarr :18989, Radarr :17878, AW :16547.
+```bash
+docker compose -f compose.sandbox.yaml up -d --build --wait   # start the sandbox
+docker compose -f compose.sandbox.yaml run --rm tests         # optional: configure it and run sandbox/tests/*.test.mjs
+docker compose -f compose.sandbox.yaml down -v                # stop and wipe all data
+```
+AW uses the real AnimeWorld (searches and download links), so internet is required. By default `sandbox/hooks/redirect-downloads.mjs`, preloaded into AW via `NODE_OPTIONS`, redirects every video download to a short generated video served by the `fixtures` service; start the stack with `SANDBOX_FAKE_DOWNLOADS=false` to download the real files. The automated tests go through the real AW tasks (`fetch_wanted`, `fetch_wanted_films`); `sandbox/tests/setup.mjs` is idempotent (test series: SAKAMOTO DAYS, test film: One Piece Film Red), but the tests need episodes S01E01/S01E02 without files, so use `down -v` before re-running them.
 
 ## Architecture
 
@@ -75,5 +84,5 @@ All routes defined in `backend/start/routes.ts`.
 ## Docker Notes
 
 - Runs rootless; mounted volumes (`config/`, `data/`) need appropriate permissions for the container user
-- `compose.yaml` mounts `./config` and `./data` and requires `APP_KEY` env var
+- `compose.yaml` mounts `./config` and `./data` and requires `APP_KEY` (from `.env`: `docker compose` stops with an error if it is missing)
 - Cross-platform builds use QEMU via GitHub Actions workflow
