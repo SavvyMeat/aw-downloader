@@ -502,7 +502,7 @@ export class RadarrService {
    * This tells Radarr to rename the movie file according to the naming scheme
    * @param movieId - The movie ID from Radarr
    */
-  async renameMovieFile(movie: RadarrMovie): Promise<void> {
+  async renameMovieFile(movie: RadarrMovie): Promise<number> {
     this.ensureInitialized()
     this.ensureHealthy()
 
@@ -511,7 +511,7 @@ export class RadarrService {
         throw new Error(`${movie.title} (${movie.year}) does not have a valid file ID`)
       }
 
-      await axios.post(
+      const response = await axios.post<{ id: number }>(
         `${this.radarrUrl}/api/v3/command`,
         {
           name: 'RenameFiles',
@@ -524,6 +524,7 @@ export class RadarrService {
           },
         }
       )
+      return response.data.id
     } catch (error) {
       throw new Error(
         `Failed to rename movie file: ${error instanceof Error ? error.message : 'Unknown error'}`

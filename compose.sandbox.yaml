@@ -35,12 +35,18 @@ services:
 
   fixtures-init:
     image: lscr.io/linuxserver/ffmpeg:9.0-cli-ls83
+    # episode.mp4: what AW downloads. other.mp4: a longer (so bigger) video with the same
+    # quality, used by the tests as "another file" for the same episode/movie
     command: >-
       -y -loglevel error
       -f lavfi -i testsrc=duration=10:size=1280x720:rate=24
       -f lavfi -i sine=frequency=440:duration=10
-      -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -shortest
+      -f lavfi -i testsrc=duration=12:size=1280x720:rate=24
+      -f lavfi -i sine=frequency=880:duration=12
+      -map 0 -map 1 -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -shortest
       /fixtures/episode.mp4
+      -map 2 -map 3 -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -shortest
+      /fixtures/other.mp4
     volumes:
       - fixtures:/fixtures
 
@@ -143,8 +149,10 @@ services:
       RADARR_URL: http://radarr:7878
       RADARR_API_KEY: *radarr-api-key
       SANDBOX_FAKE_DOWNLOADS: ${SANDBOX_FAKE_DOWNLOADS:-true}
+      SANDBOX_FIXTURES_URL: http://fixtures
     volumes:
       - ./sandbox/tests:/tests:ro
+      - media:/data/media # to place other files next to the ones AW copies
     depends_on:
       aw-downloader:
         condition: service_healthy

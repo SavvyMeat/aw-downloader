@@ -48,6 +48,16 @@ export interface SonarrEpisode {
   episodeFileId?: number
 }
 
+export interface SonarrEpisodeFile {
+  id: number
+  seriesId: number
+  seasonNumber: number
+  relativePath: string
+  path: string
+  size: number
+  releaseGroup?: string
+}
+
 export interface SonarrLanguage {
   id: number
   name?: string
@@ -270,6 +280,29 @@ export class SonarrService {
       return response.data
     } catch (error) {
       logger.error('SonarrService', `Errore durante il recupero dell'episodio`, error)
+      throw error
+    }
+  }
+
+  /**
+   * Get an episode file by ID
+   */
+  async getEpisodeFile(episodeFileId: number): Promise<SonarrEpisodeFile> {
+    this.ensureInitialized()
+    this.ensureHealthy()
+
+    try {
+      const response = await axios.get<SonarrEpisodeFile>(
+        `${this.sonarrUrl}/api/v3/episodefile/${episodeFileId}`,
+        {
+          headers: {
+            'X-Api-Key': this.sonarrToken,
+          },
+        }
+      )
+      return response.data
+    } catch (error) {
+      logger.error('SonarrService', `Errore durante il recupero del file dell'episodio`, error)
       throw error
     }
   }
@@ -608,7 +641,7 @@ export class SonarrService {
    * This tells Sonarr to rename the episode file according to the naming scheme
    * @param fileId - The episode file ID from Sonarr
    */
-  async renameEpisodeFile(episode: SonarrEpisode): Promise<void> {
+  async renameEpisodeFile(episode: SonarrEpisode): Promise<number> {
     this.ensureInitialized()
     this.ensureHealthy()
 
@@ -619,7 +652,7 @@ export class SonarrService {
         )
       }
 
-      await axios.post(
+      const response = await axios.post<{ id: number }>(
         `${this.sonarrUrl}/api/v3/command`,
         {
           name: 'RenameFiles',
@@ -632,6 +665,7 @@ export class SonarrService {
           },
         }
       )
+      return response.data.id
     } catch (error) {
       throw new Error(
         `Failed to rename file: ${error instanceof Error ? error.message : 'Unknown error'}`
