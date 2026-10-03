@@ -163,7 +163,7 @@ export function LogsCard() {
               onClick={() => setAutoRefresh(!autoRefresh)}
               className={`h-8 w-8 sm:h-9 sm:w-9 ${autoRefresh ? "bg-green-50 dark:bg-green-950 hover:bg-green-100 dark:hover:bg-green-900" : ""}`}
             >
-              <RefreshCw className={`h-3 w-3 sm:h-4 sm:w-4 ${autoRefresh ? "animate-spin" : ""}`} />
+              <RefreshCw className={`h-3 w-3 sm:h-4 sm:w-4 ${autoRefresh ? "animate-spin" : ""}`} style={{ animationDuration: "2s" }} />
             </Button>
             <Button variant="outline" size="icon" onClick={handleClear} className="h-8 w-8 sm:h-9 sm:w-9">
               <Trash2 className="h-3 w-3 sm:h-4 sm:w-4" />

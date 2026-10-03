@@ -106,8 +106,8 @@ async function prepareSeasonMonitoring(seriesId) {
   const sentinel = episodes
     .filter((e) => e.seasonNumber === 1 && e.airDateUtc && Date.parse(e.airDateUtc) < now)
     .sort((a, b) => b.episodeNumber - a.episodeNumber)[0]
-  if (!sentinel || sentinel.episodeNumber <= 2) {
-    throw new Error('The test series needs more than 2 aired episodes in season 1')
+  if (!sentinel || sentinel.episodeNumber <= 5) {
+    throw new Error('The test series needs more than 5 aired episodes in season 1')
   }
 
   const toUnmonitor = episodes.filter((e) => e.monitored && e.id !== sentinel.id).map((e) => e.id)

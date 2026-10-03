@@ -13,6 +13,7 @@ import {
   type CopiedFile,
   type ImportedFileCheck,
 } from '../helpers/imported_file.js'
+import { toArrLanguage, type ArrLanguage } from '../helpers/audio_language.js'
 import app from '@adonisjs/core/services/app'
 import emitter from '@adonisjs/core/services/emitter'
 import axios from 'axios'
@@ -31,6 +32,8 @@ export interface DownloadEpisodeParams {
   episodeNumber: number
   episodeTitle: string
   downloadUrl: string
+  /** Audio language code of the AnimeWorld entry the file comes from, if known */
+  audioLanguage?: string | null
 }
 
 export interface DownloadFilmParams {
@@ -40,6 +43,8 @@ export interface DownloadFilmParams {
   filmTitle: string
   year: number | null
   downloadUrl: string
+  /** Audio language code of the AnimeWorld entry the file comes from, if known */
+  audioLanguage?: string | null
 }
 
 export type DownloadParams = DownloadEpisodeParams | DownloadFilmParams
@@ -387,6 +392,17 @@ export class DownloadEpisodesTask {
   }
 
   /**
+   * Get the audio language to set on imported files for a service, or null when disabled or unknown
+   */
+  private static async getAudioLanguage(
+    service: 'sonarr' | 'radarr',
+    audioLanguage: string | null | undefined
+  ): Promise<ArrLanguage | null> {
+    const enabled = (await Config.get<boolean>(`${service}_audio_language_enabled`)) ?? false
+    return enabled ? toArrLanguage(audioLanguage) : null
+  }
+
+  /**
    * Log why the file linked by Sonarr/Radarr after the rescan is not updated
    */
   private static logNotImportedFile(
@@ -512,11 +528,11 @@ export class DownloadEpisodesTask {
   }
 
   /**
-   * Once Sonarr has imported the file: set the release group (if enabled)
-   * and trigger the rename (if auto-rename is enabled)
+   * Once Sonarr has imported the file: set the release group and the audio language
+   * (if enabled) and trigger the rename (if auto-rename is enabled)
    */
   private static async updateEpisodeFile(
-    { seriesTitle, episodeId, episodeNumber, seasonNumber }: DownloadEpisodeParams,
+    { seriesTitle, episodeId, episodeNumber, seasonNumber, audioLanguage }: DownloadEpisodeParams,
     copied: CopiedFile
   ): Promise<void> {
     const label = `${seriesTitle} S${seasonNumber}E${episodeNumber}`
@@ -539,11 +555,16 @@ export class DownloadEpisodesTask {
         return
       }
 
-      // Set before renaming, so that the {Release Group} naming token can use it
+      // Set before renaming, so that the {Release Group} naming token and the
+      // custom formats based on release group/language can use them
       const releaseGroup = await this.getReleaseGroup('sonarr')
-      if (releaseGroup) {
+      const language = await this.getAudioLanguage('sonarr', audioLanguage)
+      if (releaseGroup || language) {
         try {
-          await sonarrService.editEpisodeFile(episode.episodeFileId, { releaseGroup })
+          await sonarrService.editEpisodeFile(episode.episodeFileId, {
+            releaseGroup: releaseGroup ?? undefined,
+            languages: language ? [language] : undefined,
+          })
           logger.success('DownloadTask', `Informazioni ${label} aggiornate`)
         } catch (error) {
           logger.error('DownloadTask', `Impossibile aggiornare le informazioni di ${label}`, error)
@@ -638,11 +659,11 @@ export class DownloadEpisodesTask {
   }
 
   /**
-   * Once Radarr has imported the file: set the release group (if enabled)
-   * and trigger the rename (if auto-rename is enabled)
+   * Once Radarr has imported the file: set the release group and the audio language
+   * (if enabled) and trigger the rename (if auto-rename is enabled)
    */
   private static async updateMovieFile(
-    { filmId, filmTitle }: DownloadFilmParams,
+    { filmId, filmTitle, audioLanguage }: DownloadFilmParams,
     copied: CopiedFile
   ): Promise<void> {
     try {
@@ -665,11 +686,16 @@ export class DownloadEpisodesTask {
         return
       }
 
-      // Set before renaming, so that the {Release Group} naming token can use it
+      // Set before renaming, so that the {Release Group} naming token and the
+      // custom formats based on release group/language can use them
       const releaseGroup = await this.getReleaseGroup('radarr')
-      if (releaseGroup) {
+      const language = await this.getAudioLanguage('radarr', audioLanguage)
+      if (releaseGroup || language) {
         try {
-          await radarrService.editMovieFile(movie.movieFile.id, { releaseGroup })
+          await radarrService.editMovieFile(movie.movieFile.id, {
+            releaseGroup: releaseGroup ?? undefined,
+            languages: language ? [language] : undefined,
+          })
           logger.success('DownloadTask', `Informazioni ${filmTitle} aggiornate`)
         } catch (error) {
           logger.error(

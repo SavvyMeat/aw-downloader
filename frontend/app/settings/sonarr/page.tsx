@@ -76,6 +76,7 @@ interface Configs {
   sonarr_auto_rename?: boolean;
   sonarr_release_group_enabled?: boolean;
   sonarr_release_group?: string;
+  sonarr_audio_language_enabled?: boolean;
   sonarr_tags_mode?: string;
   sonarr_tags?: Array<{ label: string; value: string }>;
 }
@@ -88,6 +89,7 @@ interface ConfigInputs {
   sonarr_auto_rename: boolean;
   sonarr_release_group_enabled: boolean;
   sonarr_release_group: string;
+  sonarr_audio_language_enabled: boolean;
   sonarr_tags_mode: string;
   sonarr_tags: string[];
 }
@@ -105,6 +107,7 @@ export default function SonarrSettingsPage() {
     sonarr_auto_rename: false,
     sonarr_release_group_enabled: false,
     sonarr_release_group: "AnimeWorld",
+    sonarr_audio_language_enabled: false,
     sonarr_tags_mode: "blacklist",
     sonarr_tags: [],
   });
@@ -214,6 +217,7 @@ export default function SonarrSettingsPage() {
         sonarr_auto_rename: typeof data.sonarr_auto_rename === 'boolean' ? data.sonarr_auto_rename : data.sonarr_auto_rename === 'true',
         sonarr_release_group_enabled: typeof data.sonarr_release_group_enabled === 'boolean' ? data.sonarr_release_group_enabled : data.sonarr_release_group_enabled === 'true',
         sonarr_release_group: data.sonarr_release_group || "AnimeWorld",
+        sonarr_audio_language_enabled: typeof data.sonarr_audio_language_enabled === 'boolean' ? data.sonarr_audio_language_enabled : data.sonarr_audio_language_enabled === 'true',
         sonarr_tags_mode: data.sonarr_tags_mode || "blacklist",
         sonarr_tags: parsedTags.map((t: any) => String(t.value || t)),
       });
@@ -331,6 +335,19 @@ export default function SonarrSettingsPage() {
     }
   };
 
+  const handleAudioLanguageToggle = async (checked: boolean) => {
+    setConfigInputs((prev) => ({ ...prev, sonarr_audio_language_enabled: checked }));
+
+    try {
+      await apiUpdateConfig("sonarr_audio_language_enabled", checked);
+      setConfigs((prev) => ({ ...prev, sonarr_audio_language_enabled: checked }));
+      toast.success(checked ? "Lingua audio attivata" : "Lingua audio disattivata");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Errore salvataggio impostazione");
+      setConfigInputs((prev) => ({ ...prev, sonarr_audio_language_enabled: !checked }));
+    }
+  };
+
   const handleTagModeChange = async (value: string) => {
     setConfigInputs((prev) => ({ ...prev, sonarr_tags_mode: value }));
 
@@ -382,6 +399,7 @@ export default function SonarrSettingsPage() {
           sonarr_auto_rename: "Rinomina Automatica",
           sonarr_release_group_enabled: "Release Group",
           sonarr_release_group: "Release Group",
+          sonarr_audio_language_enabled: "Lingua Audio",
           sonarr_tags_mode: "Modalità Tag",
           sonarr_tags: "Tag",
         };
@@ -630,6 +648,24 @@ export default function SonarrSettingsPage() {
                     </p>
                   </>
                 )}
+              </div>
+              <div className="sm:hidden border-t my-4" />
+
+              {/* Audio Language */}
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between space-y-3 sm:space-y-0 sm:space-x-4">
+                <div className="space-y-1 flex-1">
+                  <Label htmlFor="audio-language-enabled" className="cursor-pointer">
+                    Lingua audio
+                  </Label>
+                  <p className="text-xs sm:text-sm text-muted-foreground">
+                    Imposta la lingua audio sui file importati in Sonarr
+                  </p>
+                </div>
+                <Switch
+                  id="audio-language-enabled"
+                  checked={configInputs.sonarr_audio_language_enabled}
+                  onCheckedChange={handleAudioLanguageToggle}
+                />
               </div>
               <div className="sm:hidden border-t my-4" />
 

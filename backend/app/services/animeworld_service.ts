@@ -5,6 +5,7 @@ import * as cheerio from 'cheerio'
 import { logger } from '#services/logger_service'
 import _ from 'lodash'
 import QueryString from 'qs'
+import { parseAnimeworldAudioLanguage } from '../helpers/audio_language.js'
 
 export enum FilterType {
   Anime = 0,
@@ -36,6 +37,24 @@ export interface AnimeSearchResult {
 export interface AnimeSearchResponse {
   animes: AnimeSearchResult[]
   users: unknown[]
+}
+
+/**
+ * An episode listed on an AnimeWorld page
+ */
+export interface AnimeworldEpisode {
+  /** URL of the episode page */
+  url: string
+  /** Audio language code of the AnimeWorld entry the episode belongs to ("jp", "it", ...) */
+  audioLanguage: string | null
+}
+
+/**
+ * Download link of an episode, with the audio language of the entry it was found in
+ */
+export interface AnimeworldEpisodeDownload {
+  url: string
+  audioLanguage: string | null
 }
 
 export interface FilterSearchResult {
@@ -292,10 +311,12 @@ export class AnimeworldService {
   /**
    * Get all episodes from multiple anime identifiers (for handling multi-part series)
    * @param animeIdentifiers - Array of anime identifiers (e.g., ["one-piece-sub-ita", "one-piece-2-sub-ita"])
-   * @returns Object with episode number as key and episode URL as value, with episodes renumbered sequentially
+   * @returns Object with episode number as key and episode as value, with episodes renumbered sequentially
    */
-  async getEpisodesFromMultiplePages(animeIdentifiers: string[]): Promise<Record<number, string>> {
-    const allEpisodes: Record<number, string> = {}
+  async getEpisodesFromMultiplePages(
+    animeIdentifiers: string[]
+  ): Promise<Record<number, AnimeworldEpisode>> {
+    const allEpisodes: Record<number, AnimeworldEpisode> = {}
     let episodeOffset = 0
 
     for (const [index, identifier] of animeIdentifiers.entries()) {
@@ -340,9 +361,9 @@ export class AnimeworldService {
   /**
    * Get all episodes from the anime identifier
    * @param animeIdentifier - The anime identifier (e.g., "one-piece-sub-ita")
-   * @returns Object with episode number as key and episode URL as value
+   * @returns Object with episode number as key and episode as value
    */
-  async getEpisodesFromPage(animeIdentifier: string): Promise<Record<number, string>> {
+  async getEpisodesFromPage(animeIdentifier: string): Promise<Record<number, AnimeworldEpisode>> {
     try {
       await this.initializeSession()
 
@@ -355,7 +376,8 @@ export class AnimeworldService {
       })
 
       const $ = cheerio.load(response.body)
-      const episodes: Record<number, string> = {}
+      const episodes: Record<number, AnimeworldEpisode> = {}
+      const audioLanguage = parseAnimeworldAudioLanguage($)
 
       // Find all episode links with selector 'ul.episodes li.episode [data-episode-num]'
       $('ul.episodes li.episode [data-episode-num]').each((_, element) => {
@@ -367,9 +389,10 @@ export class AnimeworldService {
           if (!isNaN(episodeNumber)) {
             // Make absolute URL
             const baseUrl = new URL(animePageUrl).origin
-            episodes[episodeNumber] = episodeLink.startsWith('http')
-              ? episodeLink
-              : `${baseUrl}${episodeLink}`
+            episodes[episodeNumber] = {
+              url: episodeLink.startsWith('http') ? episodeLink : `${baseUrl}${episodeLink}`,
+              audioLanguage,
+            }
           }
         }
       })
@@ -443,12 +466,12 @@ export class AnimeworldService {
    * Find and get download link for a specific episode number
    * @param animeIdentifiers - The anime identifier(s) (e.g., "one-piece-sub-ita") - can be string or array
    * @param episodeNumber - The episode number to find
-   * @returns The download URL or null if not found
+   * @returns The download URL with the audio language of the AnimeWorld entry, or null if not found
    */
-  async findEpisodeDownloadLink(
+  async findEpisodeDownload(
     animeIdentifiers: string | string[],
     episodeNumber: number
-  ): Promise<string | null> {
+  ): Promise<AnimeworldEpisodeDownload | null> {
     try {
       // Normalize to array
       const identifiers = Array.isArray(animeIdentifiers) ? animeIdentifiers : [animeIdentifiers]
@@ -460,14 +483,15 @@ export class AnimeworldService {
           : await this.getEpisodesFromPage(identifiers[0])
 
       // Check if the episode exists
-      if (!episodes[episodeNumber]) {
+      const episode = episodes[episodeNumber]
+      if (!episode) {
         logger.warning('AnimeWorld', `Episodio ${episodeNumber} non disponibile`)
         return null
       }
 
       // Get the download link for the episode
-      const downloadLink = await this.getDownloadLinkFromEpisode(episodes[episodeNumber])
-      return downloadLink
+      const downloadLink = await this.getDownloadLinkFromEpisode(episode.url)
+      return downloadLink ? { url: downloadLink, audioLanguage: episode.audioLanguage } : null
     } catch (error) {
       logger.error('AnimeWorld', `Errore durante la ricerca dell'episodio ${episodeNumber}`, error)
       return null

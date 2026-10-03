@@ -2,7 +2,7 @@ import { BaseTask } from './base_task.js'
 import Season from '#models/season'
 import Config from '#models/config'
 import { getDownloadQueue } from '#services/download_queue'
-import { AnimeworldService } from '#services/animeworld_service'
+import { AnimeworldService, type AnimeworldEpisodeDownload } from '#services/animeworld_service'
 import { logger } from '#services/logger_service'
 import { getSonarrService, type SonarrWantedRecord } from '#services/sonarr_service'
 import { SeriesMetadataSyncService } from '#services/series_metadata_sync_service'
@@ -156,9 +156,9 @@ export class FetchWantedSeriesTask extends BaseTask {
         }
 
         // Get download URL from AnimeWorld
-        const downloadUrl = await this.findDownloadUrl(series, season, wantedEp)
+        const download = await this.findDownload(series, season, wantedEp)
 
-        if (!downloadUrl) {
+        if (!download) {
           logger.warning(
             'FetchWanted',
             `Link di download non trovato per: ${wantedEp.series.title} S${wantedEp.seasonNumber}E${wantedEp.episodeNumber}`
@@ -176,7 +176,8 @@ export class FetchWantedSeriesTask extends BaseTask {
           seasonNumber: wantedEp.seasonNumber,
           episodeNumber: wantedEp.episodeNumber,
           episodeTitle: wantedEp.title,
-          downloadUrl: downloadUrl,
+          downloadUrl: download.url,
+          audioLanguage: download.audioLanguage,
         })
 
         addedCount++
@@ -196,13 +197,13 @@ export class FetchWantedSeriesTask extends BaseTask {
   }
 
   /**
-   * Find download URL for an episode using AnimeWorld
+   * Find download URL (and audio language) for an episode using AnimeWorld
    */
-  private async findDownloadUrl(
+  private async findDownload(
     serie: Series,
     season: Season,
     episode: SonarrWantedRecord
-  ): Promise<string | null> {
+  ): Promise<AnimeworldEpisodeDownload | null> {
     try {
 
       if (!season.downloadUrls || season.downloadUrls.length === 0) {
@@ -223,12 +224,10 @@ export class FetchWantedSeriesTask extends BaseTask {
       }
 
       // Pass all identifiers to handle multi-part series
-      const downloadLink = await this.animeworldService.findEpisodeDownloadLink(
+      return await this.animeworldService.findEpisodeDownload(
         season.downloadUrls,
         episodeNumberToSearch
       )
-
-      return downloadLink
     } catch (error) {
       logger.error('FetchWanted', `Errore durante la ricerca del link di download`, error)
       return null

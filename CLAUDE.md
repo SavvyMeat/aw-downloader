@@ -39,7 +39,7 @@ docker compose -f compose.sandbox.yaml up -d --build --wait   # start the sandbo
 docker compose -f compose.sandbox.yaml run --rm tests         # optional: configure it and run sandbox/tests/*.test.mjs
 docker compose -f compose.sandbox.yaml down -v                # stop and wipe all data
 ```
-AW uses the real AnimeWorld (searches and download links), so internet is required. By default `sandbox/hooks/redirect-downloads.mjs`, preloaded into AW via `NODE_OPTIONS`, redirects every video download to a short generated video served by the `fixtures` service; start the stack with `SANDBOX_FAKE_DOWNLOADS=false` to download the real files. The automated tests go through the real AW tasks (`fetch_wanted`, `fetch_wanted_films`); `sandbox/tests/setup.mjs` is idempotent (test series: SAKAMOTO DAYS, test film: One Piece Film Red), but the tests need episodes S01E01/S01E02 without files, so use `down -v` before re-running them.
+AW uses the real AnimeWorld (searches and download links), so internet is required. By default `sandbox/hooks/redirect-downloads.mjs`, preloaded into AW via `NODE_OPTIONS`, redirects every video download to a short generated video served by the `fixtures` service; start the stack with `SANDBOX_FAKE_DOWNLOADS=false` to download the real files. The automated tests go through the real AW tasks (`fetch_wanted`, `fetch_wanted_films`); `sandbox/tests/setup.mjs` is idempotent (test series: SAKAMOTO DAYS, test film: One Piece Film Red), but the tests need episodes S01E01–S01E05 without files, so use `down -v` before re-running them.
 
 ## Architecture
 

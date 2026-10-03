@@ -68,6 +68,7 @@ interface Configs {
   radarr_auto_rename?: boolean;
   radarr_release_group_enabled?: boolean;
   radarr_release_group?: string;
+  radarr_audio_language_enabled?: boolean;
   radarr_tags_mode?: string;
   radarr_tags?: Array<{ label: string; value: string }>;
 }
@@ -79,6 +80,7 @@ interface ConfigInputs {
   radarr_auto_rename: boolean;
   radarr_release_group_enabled: boolean;
   radarr_release_group: string;
+  radarr_audio_language_enabled: boolean;
   radarr_tags_mode: string;
   radarr_tags: string[];
 }
@@ -95,6 +97,7 @@ export default function RadarrSettingsPage() {
     radarr_auto_rename: false,
     radarr_release_group_enabled: false,
     radarr_release_group: "AnimeWorld",
+    radarr_audio_language_enabled: false,
     radarr_tags_mode: "blacklist",
     radarr_tags: [],
   });
@@ -184,6 +187,7 @@ export default function RadarrSettingsPage() {
         radarr_auto_rename: typeof data.radarr_auto_rename === "boolean" ? data.radarr_auto_rename : data.radarr_auto_rename === "true",
         radarr_release_group_enabled: typeof data.radarr_release_group_enabled === "boolean" ? data.radarr_release_group_enabled : data.radarr_release_group_enabled === "true",
         radarr_release_group: data.radarr_release_group || "AnimeWorld",
+        radarr_audio_language_enabled: typeof data.radarr_audio_language_enabled === "boolean" ? data.radarr_audio_language_enabled : data.radarr_audio_language_enabled === "true",
         radarr_tags_mode: data.radarr_tags_mode || "blacklist",
         radarr_tags: parsedTags.map((t: any) => String(t.value || t)),
       });
@@ -287,6 +291,19 @@ export default function RadarrSettingsPage() {
     }
   };
 
+  const handleAudioLanguageToggle = async (checked: boolean) => {
+    setConfigInputs((prev) => ({ ...prev, radarr_audio_language_enabled: checked }));
+
+    try {
+      await apiUpdateConfig("radarr_audio_language_enabled", checked);
+      setConfigs((prev) => ({ ...prev, radarr_audio_language_enabled: checked }));
+      toast.success(checked ? "Lingua audio attivata" : "Lingua audio disattivata");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Errore salvataggio impostazione");
+      setConfigInputs((prev) => ({ ...prev, radarr_audio_language_enabled: !checked }));
+    }
+  };
+
   const handleTagModeChange = async (value: string) => {
     setConfigInputs((prev) => ({ ...prev, radarr_tags_mode: value }));
     try {
@@ -335,6 +352,7 @@ export default function RadarrSettingsPage() {
           radarr_auto_rename: "Rinomina Automatica",
           radarr_release_group_enabled: "Release Group",
           radarr_release_group: "Release Group",
+          radarr_audio_language_enabled: "Lingua Audio",
           radarr_tags_mode: "Modalità Tag",
           radarr_tags: "Tag",
         };
@@ -564,6 +582,24 @@ export default function RadarrSettingsPage() {
                     </p>
                   </>
                 )}
+              </div>
+              <div className="sm:hidden border-t my-4" />
+
+              {/* Audio Language */}
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between space-y-3 sm:space-y-0 sm:space-x-4">
+                <div className="space-y-1 flex-1">
+                  <Label htmlFor="audio-language-enabled" className="cursor-pointer">
+                    Lingua audio
+                  </Label>
+                  <p className="text-xs sm:text-sm text-muted-foreground">
+                    Imposta la lingua audio sui file importati in Radarr
+                  </p>
+                </div>
+                <Switch
+                  id="audio-language-enabled"
+                  checked={configInputs.radarr_audio_language_enabled}
+                  onCheckedChange={handleAudioLanguageToggle}
+                />
               </div>
               <div className="sm:hidden border-t my-4" />
 

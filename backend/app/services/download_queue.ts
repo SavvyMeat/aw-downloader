@@ -15,6 +15,8 @@ interface BaseQueueItem {
   startedAt?: Date
   completedAt?: Date
   error?: string
+  /** Audio language code of the AnimeWorld entry the file comes from, if known */
+  audioLanguage?: string | null
 }
 
 export interface EpisodeQueueItem extends BaseQueueItem {
@@ -315,6 +317,7 @@ export class DownloadQueue extends EventEmitter {
               filmTitle: item.filmTitle,
               year: item.year,
               downloadUrl: item.downloadUrl,
+              audioLanguage: item.audioLanguage ?? null,
             }
           : {
               mediaType: 'episode' as const,
@@ -326,6 +329,7 @@ export class DownloadQueue extends EventEmitter {
               episodeNumber: item.episodeNumber,
               episodeTitle: item.episodeTitle,
               downloadUrl: item.downloadUrl,
+              audioLanguage: item.audioLanguage ?? null,
             }
 
       await DownloadEpisodesTask.execute(params, item.id)

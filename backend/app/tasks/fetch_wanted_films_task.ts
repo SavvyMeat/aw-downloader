@@ -139,12 +139,9 @@ export class FetchWantedFilmsTask extends BaseTask {
         }
 
         // A film maps to "episode 1" of the AnimeWorld entry
-        const downloadUrl = await this.animeworldService.findEpisodeDownloadLink(
-          film.animeworldUrl,
-          1
-        )
+        const download = await this.animeworldService.findEpisodeDownload(film.animeworldUrl, 1)
 
-        if (!downloadUrl) {
+        if (!download) {
           logger.warning(
             'FetchWantedFilms',
             `Link di download non trovato per: ${film.title}`
@@ -158,7 +155,8 @@ export class FetchWantedFilmsTask extends BaseTask {
           radarrId: film.radarrId,
           filmTitle: film.title,
           year: film.year,
-          downloadUrl,
+          downloadUrl: download.url,
+          audioLanguage: download.audioLanguage,
         })
 
         addedCount++
