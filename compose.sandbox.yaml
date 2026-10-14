@@ -34,7 +34,7 @@ services:
       - media:/data/media
 
   fixtures-init:
-    image: lscr.io/linuxserver/ffmpeg:9.0-cli-ls83
+    image: linuxserver/ffmpeg:9.0-cli-ls83
     # episode.mp4: what AW downloads. other.mp4: a longer (so bigger) video with the same
     # quality, used by the tests as "another file" for the same episode/movie
     command: >-
@@ -64,7 +64,7 @@ services:
       retries: 12
 
   sonarr:
-    image: lscr.io/linuxserver/sonarr:4.0.20.3014-ls325
+    image: linuxserver/sonarr:4.0.20.3014-ls325
     environment:
       <<: *arr-environment
       SONARR__AUTH__APIKEY: *sonarr-api-key
@@ -85,7 +85,7 @@ services:
       start_period: 20s
 
   radarr:
-    image: lscr.io/linuxserver/radarr:6.4.4.10685-ls317
+    image: linuxserver/radarr:6.4.4.10685-ls317
     environment:
       <<: *arr-environment
       RADARR__AUTH__APIKEY: *radarr-api-key

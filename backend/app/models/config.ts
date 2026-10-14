@@ -40,7 +40,7 @@ export default class Config extends BaseModel {
    */
   static async get<T = any>(key: string): Promise<T | null> {
     const config = await Config.findBy('key', key)
-    if (!config?.value) {
+    if (config?.value === null || config?.value === undefined) {
       return null
     }
     return config.value as T
