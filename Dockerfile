@@ -19,7 +19,8 @@ RUN node ace build
 
 # ============================================
 # Frontend Stage
-FROM $NODE_IMAGE AS dependencies_frontend
+# The static export is the same on every platform: build it once, natively
+FROM --platform=$BUILDPLATFORM $NODE_IMAGE AS dependencies_frontend
 RUN mkdir -p /app && chown node:node /app
 WORKDIR /app
 USER node
