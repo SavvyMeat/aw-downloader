@@ -1,4 +1,4 @@
-import got from 'got'
+import { got } from '#services/http_clients'
 import { logger } from '#services/logger_service'
 import { DateTime } from 'luxon'
 import { Utility } from '../helpers/utility.js'

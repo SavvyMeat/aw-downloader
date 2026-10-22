@@ -1,4 +1,4 @@
-import axios from 'axios'
+import { axios } from '#services/http_clients'
 import Config from '#models/config'
 import { logger } from '#services/logger_service'
 import { DateTime } from 'luxon'

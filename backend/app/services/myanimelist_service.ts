@@ -1,5 +1,5 @@
 import { logger } from '#services/logger_service'
-import got from 'got'
+import { got } from '#services/http_clients'
 import pThrottle from 'p-throttle'
 
 export interface MyAnimeListAnimeResponse {

@@ -1,5 +1,6 @@
 import Config from '#models/config'
-import got, { Got } from 'got'
+import type { Got } from 'got'
+import { got } from '#services/http_clients'
 import { CookieJar } from 'tough-cookie'
 import * as cheerio from 'cheerio'
 import { logger } from '#services/logger_service'

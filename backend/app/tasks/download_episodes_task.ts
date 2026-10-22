@@ -16,7 +16,7 @@ import {
 import { toArrLanguage, type ArrLanguage } from '../helpers/audio_language.js'
 import app from '@adonisjs/core/services/app'
 import emitter from '@adonisjs/core/services/emitter'
-import axios from 'axios'
+import { axios } from '#services/http_clients'
 import { createWriteStream } from 'fs'
 import fs from 'fs/promises'
 import path from 'path'

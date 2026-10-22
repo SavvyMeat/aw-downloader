@@ -16,7 +16,7 @@ import {
   type SonarrSeries,
 } from '#services/sonarr_service'
 import app from '@adonisjs/core/services/app'
-import axios from 'axios'
+import { axios } from '#services/http_clients'
 import fs from 'fs/promises'
 import _ from 'lodash'
 import { DateTime } from 'luxon'
