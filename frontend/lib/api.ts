@@ -429,6 +429,8 @@ export async function updateConfig(key: string, value: any): Promise<{ key: stri
 interface BaseQueueItem {
   id: string;
   status: "pending" | "downloading" | "completed" | "failed";
+  /** While downloading: the file is being downloaded, or being imported into Sonarr/Radarr */
+  phase?: "downloading" | "importing";
   progress: number;
   downloadSpeed?: number; // bytes per second
   totalSize?: number; // bytes

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import DownloadQueueItem from "@/components/download-queue-item";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,10 +17,6 @@ import {
 import { 
   Download, 
   Loader2, 
-  X, 
-  CheckCircle2, 
-  XCircle, 
-  Clock,
   Trash2,
   StopCircle
 } from "lucide-react";
@@ -114,55 +111,6 @@ export default function DownloadQueueCard() {
   const getItemTitle = (item: QueueItem): string =>
     item.mediaType === "film" ? item.filmTitle : item.seriesTitle;
 
-  const getItemSubtitle = (item: QueueItem): string =>
-    item.mediaType === "film"
-      ? item.year
-        ? `Film • ${item.year}`
-        : "Film"
-      : `S${item.seasonNumber}E${item.episodeNumber} - ${item.episodeTitle}`;
-
-  const formatSpeed = (bytesPerSecond: number): string => {
-    const mbps = bytesPerSecond / (1024 * 1024);
-    if (mbps >= 1) {
-      return `${mbps.toFixed(2)} MB/s`;
-    }
-    const kbps = bytesPerSecond / 1024;
-    return `${kbps.toFixed(2)} KB/s`;
-  };
-
-  const formatSize = (bytes: number): string => {
-    const gb = bytes / (1024 * 1024 * 1024);
-    if (gb >= 1) return `${gb.toFixed(2)} GB`;
-    const mb = bytes / (1024 * 1024);
-    return `${mb.toFixed(1)} MB`;
-  };
-
-  const getStatusIcon = (status: QueueItem["status"]) => {
-    switch (status) {
-      case "pending":
-        return <Clock className="h-4 w-4 text-muted-foreground" />;
-      case "downloading":
-        return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
-      case "completed":
-        return <CheckCircle2 className="h-4 w-4 text-green-500" />;
-      case "failed":
-        return <XCircle className="h-4 w-4 text-red-500" />;
-    }
-  };
-
-  const getStatusText = (status: QueueItem["status"]) => {
-    switch (status) {
-      case "pending":
-        return "In coda";
-      case "downloading":
-        return "Download in corso";
-      case "completed":
-        return "Completato";
-      case "failed":
-        return "Fallito";
-    }
-  };
-
   const pendingItems = items.filter(i => i.status === "pending");
   const activeItems = items.filter(i => i.status === "downloading");
   const completedItems = items.filter(i => i.status === "completed");
@@ -206,7 +154,7 @@ export default function DownloadQueueCard() {
           <div className="flex gap-2">
             {(activeItems.length > 0 || pendingItems.length > 0) && (
               <Button
-                variant="destructive"
+                variant="outline"
                 size="sm"
                 onClick={() => setShowStopAllDialog(true)}
                 className="w-full sm:w-auto"
@@ -245,73 +193,7 @@ export default function DownloadQueueCard() {
         ) : (
           <div className="space-y-2 sm:space-y-3 max-h-[400px] sm:max-h-[600px] overflow-y-auto">
             {items.map((item) => (
-              <div
-                key={item.id}
-                className="border rounded-lg p-2 sm:p-3 space-y-2"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      {getStatusIcon(item.status)}
-                      <h4 className="font-medium text-xs sm:text-sm truncate">
-                        {getItemTitle(item)}
-                      </h4>
-                    </div>
-                    <p className="text-[10px] sm:text-xs text-muted-foreground truncate">
-                      {getItemSubtitle(item)}
-                    </p>
-                  </div>
-                  {(item.status === "pending" || item.status === "downloading") && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleRemove(item.id)}
-                      title={item.status === "downloading" ? "Annulla download" : "Rimuovi dalla coda"}
-                      className={`h-7 w-7 sm:h-8 sm:w-8 ${item.status === "downloading" ? "text-red-600 hover:text-red-700 hover:bg-red-50" : ""}`}
-                    >
-                      {item.status === "downloading" ? (
-                        <StopCircle className="h-3 w-3 sm:h-4 sm:w-4" />
-                      ) : (
-                        <X className="h-3 w-3 sm:h-4 sm:w-4" />
-                      )}
-                    </Button>
-                  )}
-                </div>
-
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between text-[10px] sm:text-xs">
-                    <span className="text-muted-foreground">
-                      {getStatusText(item.status)}
-                    </span>
-                    <div className="flex items-center gap-1 sm:gap-2">
-                      {item.status === "downloading" && item.totalSize && (
-                        <span className="text-muted-foreground">
-                          {formatSize(item.totalSize)}
-                        </span>
-                      )}
-                      {item.status === "downloading" && item.downloadSpeed && (
-                        <span className="text-muted-foreground">
-                          {formatSpeed(item.downloadSpeed)}
-                        </span>
-                      )}
-                      {item.status === "downloading" && (
-                        <span className="font-medium">{item.progress}%</span>
-                      )}
-                    </div>
-                  </div>
-                  {(item.status === "downloading" || item.status === "completed") && (
-                    <div className="w-full bg-muted rounded-full h-1 overflow-hidden">
-                      <div 
-                        className="bg-blue-500 h-full transition-all duration-300"
-                        style={{ width: `${item.progress}%` }}
-                      />
-                    </div>
-                  )}
-                  {item.error && (
-                    <p className="text-[10px] sm:text-xs text-red-600 dark:text-red-400 break-words">{item.error}</p>
-                  )}
-                </div>
-              </div>
+              <DownloadQueueItem key={item.id} item={item} onRemove={handleRemove} />
             ))}
           </div>
         )}
