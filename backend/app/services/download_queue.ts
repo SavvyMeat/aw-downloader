@@ -1,6 +1,4 @@
 import { EventEmitter } from 'events'
-import app from '@adonisjs/core/services/app'
-import fs from 'fs/promises'
 import { logger } from './logger_service.js'
 import Config from '#models/config'
 
@@ -8,6 +6,11 @@ interface BaseQueueItem {
   id: string
   downloadUrl: string
   status: 'pending' | 'downloading' | 'completed' | 'failed'
+  /**
+   * Step of an item with status "downloading": the file is being downloaded, or it is
+   * complete and being copied/imported into Sonarr/Radarr (it can not be cancelled then)
+   */
+  phase?: 'downloading' | 'importing'
   progress: number
   downloadSpeed?: number // bytes per second
   totalSize?: number // bytes
@@ -149,7 +152,16 @@ export class DownloadQueue extends EventEmitter {
   async cancelDownload(id: string): Promise<boolean> {
     // Check if it's an active download
     const item = this.activeDownloads.get(id)
-    
+
+    // Stopping the copy halfway would leave a partial file in the Sonarr/Radarr folder
+    if (item?.phase === 'importing') {
+      logger.warning(
+        'DownloadQueue',
+        `Impossibile annullare ${describeItem(item)}: importazione già in corso`
+      )
+      return false
+    }
+
     if (item) {
       logger.warning('DownloadQueue', `Annullamento download in corso: ${describeItem(item)}`)
 
@@ -163,17 +175,9 @@ export class DownloadQueue extends EventEmitter {
       item.completedAt = new Date()
       this.activeDownloads.delete(id)
       this.emit('item-cancelled', item)
-      
-      // Remove partial download files
-      try {
-        const tempDir = app.tmpPath(`downloads/${id}`)
 
-        await fs.rm(tempDir, { recursive: true, force: true })
-        logger.success('DownloadQueue', `File temporanei rimossi per: ${describeItem(item)}`)
-      } catch (error) {
-        logger.error('DownloadQueue', `Errore durante la rimozione dei file temporanei`, error)
-      }
-      
+      // The partial file is removed by the download task as soon as it sees the cancellation
+
       // Continue processing queue
       this.processQueue()
       
@@ -225,6 +229,23 @@ export class DownloadQueue extends EventEmitter {
       }
       if (totalSize !== undefined) {
         item.totalSize = totalSize
+      }
+      this.emit('progress-update', item)
+    }
+  }
+
+  /**
+   * Change the phase of a downloading item. When importing, the download is over:
+   * the progress is full and there is no speed to show
+   */
+  setPhase(id: string, phase: 'downloading' | 'importing'): void {
+    const item = this.activeDownloads.get(id)
+
+    if (item) {
+      item.phase = phase
+      if (phase === 'importing') {
+        item.progress = 100
+        item.downloadSpeed = undefined
       }
       this.emit('progress-update', item)
     }
@@ -287,6 +308,7 @@ export class DownloadQueue extends EventEmitter {
       
       if (item) {
         item.status = 'downloading'
+        item.phase = 'downloading'
         item.startedAt = new Date()
         this.activeDownloads.set(item.id, item)
         this.emit('item-started', item)

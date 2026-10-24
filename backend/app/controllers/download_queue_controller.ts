@@ -109,7 +109,8 @@ export default class DownloadQueueController {
     
     // Stop all pending and downloading items
     const itemsToStop = items.filter(
-      (item) => item.status === 'pending' || item.status === 'downloading'
+      (item) =>
+        item.status === 'pending' || (item.status === 'downloading' && item.phase !== 'importing')
     )
 
     for (const item of itemsToStop) {

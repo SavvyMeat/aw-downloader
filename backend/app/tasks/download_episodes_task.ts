@@ -14,11 +14,12 @@ import {
   type ImportedFileCheck,
 } from '../helpers/imported_file.js'
 import { toArrLanguage, type ArrLanguage } from '../helpers/audio_language.js'
+import { SpeedMeter } from '../helpers/speed_meter.js'
 import app from '@adonisjs/core/services/app'
 import emitter from '@adonisjs/core/services/emitter'
 import { axios } from '#services/http_clients'
-import { createWriteStream } from 'fs'
-import fs from 'fs/promises'
+import type { AxiosError } from 'axios'
+import fs, { type FileHandle } from 'fs/promises'
 import path from 'path'
 import string from '@adonisjs/core/helpers/string'
 
@@ -49,12 +50,84 @@ export interface DownloadFilmParams {
 
 export type DownloadParams = DownloadEpisodeParams | DownloadFilmParams
 
-interface DownloadChunk {
-  chunkIndex: number
+interface DownloadSegment {
   start: number
   end: number
-  filePath: string
 }
+
+const MB = 1024 * 1024
+
+/**
+ * Segments are file size / workers, so files up to workers × MAX_SEGMENT_SIZE take one
+ * request per worker. Bigger files get more segments: a worker that is done takes the next one
+ */
+const MIN_SEGMENT_SIZE = 16 * MB
+const MAX_SEGMENT_SIZE = 100 * MB
+
+/** Smaller files are not a real episode or film (e.g. an error page or a broken upload) */
+const MIN_FILE_SIZE = 5 * MB
+
+/**
+ * Content-Type values accepted for the file. Each pattern must match the whole value,
+ * lowercase and without parameters (e.g. "video/mp4", not "video/mp4; charset=binary")
+ */
+const ALLOWED_CONTENT_TYPES = [/^video\/.+$/, /^application\/octet-stream$/, /^application\/mp4$/]
+
+/** File extensions accepted for the file */
+const VIDEO_EXTENSIONS = new Set([
+  'mp4',
+  'm4v',
+  'mkv',
+  'webm',
+  'avi',
+  'mov',
+  'wmv',
+  'flv',
+  'ts',
+  'm2ts',
+  'mpg',
+  'mpeg',
+  'ogv',
+  '3gp',
+])
+
+/** Time window of the download speed shown in the queue */
+const SPEED_WINDOW_MS = 5000
+
+/** Interval between progress and speed updates sent to the queue */
+const PROGRESS_INTERVAL_MS = 1000
+
+/** Attempts per segment before the whole download fails */
+const MAX_SEGMENT_ATTEMPTS = 3
+
+/** Wait before retrying after a 429 without Retry-After, multiplied by the attempt number */
+const RATE_LIMIT_BASE_DELAY_MS = 5000
+
+/** Longest wait accepted from a Retry-After header */
+const RATE_LIMIT_MAX_DELAY_MS = 60_000
+
+/** Suffix of the file while it is being downloaded */
+const PARTIAL_SUFFIX = '.tmp'
+
+/** Thrown inside the workers when the user cancels the download */
+class DownloadCancelledError extends Error {}
+
+/**
+ * The file offered by the server does not look like a video: the download is skipped with
+ * a warning in the log, without notifications, and retried at the next fetch of the wanted list
+ */
+class FileRejectedError extends Error {}
+
+/** Byte counters shared by the workers of one download */
+interface DownloadCounters {
+  /** Bytes written and kept, for the progress */
+  valid: number
+  /** Bytes received from the network, also from failed attempts, for the speed */
+  speed: SpeedMeter
+}
+
+/** The server answer can not be used at all: retrying the segment would not help */
+class SegmentNotSupportedError extends Error {}
 
 export class DownloadEpisodesTask {
   private static cancelledDownloads: Set<string> = new Set()
@@ -81,11 +154,12 @@ export class DownloadEpisodesTask {
   }
 
   /**
-   * Download a single episode using multiple worker threads
+   * Download a single episode or film with parallel Range requests, then import it
    */
   static async execute(params: DownloadParams, queueItemId: string): Promise<void> {
     const queue = getDownloadQueue()
-    
+    let outputPath: string | null = null
+
     try {
       // Check if cancelled before starting
       if (this.isCancelled(queueItemId)) {
@@ -105,47 +179,42 @@ export class DownloadEpisodesTask {
         return
       }
       
-      // Create temp directory for chunks using AdonisJS storage
-      const tempDir = app.tmpPath(`downloads/${queueItemId}`)
-      await fs.mkdir(tempDir, { recursive: true })
-      
-      // Calculate chunk sizes
-      const chunkSize = Math.ceil(fileSize / maxWorkers)
-      const chunks: DownloadChunk[] = []
-      
-      for (let i = 0; i < maxWorkers; i++) {
-        const start = i * chunkSize
-        const end = Math.min(start + chunkSize - 1, fileSize - 1)
-        chunks.push({
-          chunkIndex: i,
-          start,
-          end,
-          filePath: path.join(tempDir, `chunk_${i}.tmp`),
-        })
-      }
-      
-      // Download chunks in parallel using workers
-      await this.downloadChunks(params.downloadUrl, chunks, queue, queueItemId, fileSize)
-      
-      // Check if cancelled after download
-      if (this.isCancelled(queueItemId)) {
+      // Segments are written straight into one temp file, no merge step.
+      // It keeps the ".tmp" suffix until every segment is downloaded and checked
+      const finalPath = app.tmpPath('downloads', `${string.random(16)}.${fileExtension}`)
+      outputPath = finalPath + PARTIAL_SUFFIX
+      await fs.mkdir(path.dirname(outputPath), { recursive: true })
+
+      const completed = await this.downloadSegments(
+        params.downloadUrl,
+        outputPath,
+        fileSize,
+        maxWorkers,
+        queue,
+        queueItemId
+      )
+
+      // Cancelled while downloading
+      if (!completed) {
         this.removeCancelled(queueItemId)
-        // Clean up temp directory
-        await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {})
+        await fs.rm(outputPath, { force: true }).catch(() => {})
         return
       }
-      
-      // Merge chunks
-      const outputPath = app.tmpPath(
-        'downloads',
-        `${string.random(16)}.${fileExtension.replace(/^\.*/, '')}`
-      )
-      await fs.mkdir(path.dirname(outputPath), { recursive: true })
-      await this.mergeChunks(chunks, outputPath)
-      
-      // Clean up temp files
-      await fs.rm(tempDir, { recursive: true, force: true })
-      
+
+      // Complete: drop the ".tmp" suffix, the *arr copy reads the extension from the name
+      await fs.rename(outputPath, finalPath)
+      outputPath = finalPath
+
+      // Cancelled right after the last segment: do not import it
+      if (this.isCancelled(queueItemId)) {
+        this.removeCancelled(queueItemId)
+        await fs.rm(outputPath, { force: true }).catch(() => {})
+        return
+      }
+
+      // From here on the file is copied and imported: it can no longer be cancelled
+      queue.setPhase(queueItemId, 'importing')
+
       // Copy file to the *arr folder, wait for the rescan, then update/rename the imported file
       if (params.mediaType === 'film') {
         const copied = await this.copyToRadarrAndRescan(params, outputPath)
@@ -181,9 +250,31 @@ export class DownloadEpisodesTask {
       await emitter.emit(DownloadSuccessEvent, successEvent)
 
     } catch (error) {
+      // Don't leave a partial file behind
+      if (outputPath) {
+        await fs.rm(outputPath, { force: true }).catch(() => {})
+      }
+
+      // Cancelled by the user while something failed: the queue already dropped the item,
+      // so no failure to record and no notification
+      if (this.isCancelled(queueItemId)) {
+        this.removeCancelled(queueItemId)
+        return
+      }
+
       // Mark as failed
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       queue.failItem(queueItemId, errorMessage)
+
+      // Not a video: only a warning, the episode stays missing and is retried later
+      if (error instanceof FileRejectedError) {
+        logger.warning(
+          'DownloadTask',
+          `File scartato per ${this.describeParams(params)}: ${errorMessage}. Verrà ritentato al prossimo controllo dei mancanti`
+        )
+        return
+      }
+
       console.error(`Download failed for ${this.describeParams(params)}:`, error)
 
       // Emit download error event
@@ -222,134 +313,354 @@ export class DownloadEpisodesTask {
   }
   
   /**
-   * Get file extension from URL or Content-Disposition header
+   * Read size and extension of the file with a HEAD request, and reject it before downloading
+   * when it does not look like a video: Content-Type not allowed, extension not allowed or too small
    */
-  private static async getFileInfo(url: string): Promise<{extension: string, size: number}> {
-    const response = await axios.head(url)
+  private static async getFileInfo(url: string): Promise<{ extension: string; size: number }> {
+    // Uncompressed, so Content-Length is the size of the file itself
+    const response = await axios.head(url, { headers: { 'Accept-Encoding': 'identity' } })
 
-    const contentLength = response.headers['content-length']
-    if (!contentLength) {
+    const contentType = String(response.headers['content-type'] ?? '')
+      .split(';')[0]
+      .trim()
+      .toLowerCase()
+    // No Content-Type says nothing about the file: a real error (with notification), not a
+    // silent rejection, otherwise every download would be skipped without anyone noticing
+    if (!contentType) {
+      throw new Error('Il server non ha indicato il tipo del file (Content-Type assente)')
+    }
+    if (!this.isAllowedContentType(contentType)) {
+      throw new FileRejectedError(`Content-Type non ammesso: ${contentType}`)
+    }
+
+    const fileSize = Number.parseInt(String(response.headers['content-length'] ?? ''))
+    if (Number.isNaN(fileSize)) {
       throw new Error('Could not determine file size')
     }
-    const fileSize = parseInt(contentLength)
+    if (fileSize < MIN_FILE_SIZE) {
+      throw new FileRejectedError(
+        `file troppo piccolo (${this.formatBytes(fileSize)}, minimo ${this.formatBytes(MIN_FILE_SIZE)})`
+      )
+    }
 
-    
+    const extension = this.getExtension(url, response.headers['content-disposition'])
+    if (!VIDEO_EXTENSIONS.has(extension)) {
+      throw new FileRejectedError(
+        `estensione non ammessa: ${extension ? `.${extension}` : 'assente'}`
+      )
+    }
 
-    // Try to get filename from Content-Disposition header
-    let extension;
-    const contentDisposition = response.headers['content-disposition']
-    if (contentDisposition) {
+    return { extension, size: fileSize }
+  }
+
+  /**
+   * Content-Type allowlist: the value must match one of ALLOWED_CONTENT_TYPES
+   */
+  private static isAllowedContentType(contentType: string): boolean {
+    return ALLOWED_CONTENT_TYPES.some((pattern) => pattern.test(contentType))
+  }
+
+  /**
+   * Lowercase extension without the dot: from the Content-Disposition filename when present,
+   * otherwise from the URL path. Empty string when neither has one
+   */
+  private static getExtension(url: string, contentDisposition: unknown): string {
+    if (typeof contentDisposition === 'string') {
       const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
       if (filenameMatch && filenameMatch[1]) {
         const filename = filenameMatch[1].replace(/['"]/g, '')
-        const ext = path.extname(filename)
-        if (ext) extension = ext
+        const extension = path.extname(filename)
+        if (extension) {
+          return extension.slice(1).toLowerCase()
+        }
       }
     }
-    
-    // Fallback: extract from URL
-    const urlPath = new URL(url).pathname
-    extension = path.extname(urlPath)
-    if (!extension) {
-      throw new Error('Could not determine file extension')
-    }
-    
+    return path.extname(new URL(url).pathname).slice(1).toLowerCase()
+  }
 
-    
-    // Default to .mkv if nothing found
-    return {
-      extension, 
-      size: fileSize
-    }
-  }
-  
   /**
-   * Download chunks using parallel HTTP requests with Promise.all
+   * Human-readable size for log messages
    */
-  private static async downloadChunks(
-    url: string,
-    chunks: DownloadChunk[],
-    queue: ReturnType<typeof getDownloadQueue>,
-    queueItemId: string,
-    totalFileSize: number
+  private static formatBytes(bytes: number): string {
+    if (bytes >= MB) {
+      return `${(bytes / MB).toFixed(1)} MB`
+    }
+    return `${(bytes / 1024).toFixed(1)} KB`
+  }
+
+  /**
+   * Split the file in segments of file size / workers, kept between MIN_SEGMENT_SIZE
+   * and MAX_SEGMENT_SIZE. The last segment ends at the end of the file
+   */
+  private static splitIntoSegments(fileSize: number, workers: number): DownloadSegment[] {
+    const segmentSize = Math.min(
+      MAX_SEGMENT_SIZE,
+      Math.max(MIN_SEGMENT_SIZE, Math.ceil(fileSize / Math.max(1, workers)))
+    )
+    const segments: DownloadSegment[] = []
+    for (let start = 0; start < fileSize; start += segmentSize) {
+      segments.push({ start, end: Math.min(start + segmentSize, fileSize) - 1 })
+    }
+    return segments
+  }
+
+  /**
+   * How long to wait after a 429: the Retry-After header (seconds or HTTP date) when present,
+   * otherwise a delay growing with the attempt number
+   */
+  private static rateLimitDelay(retryAfter: unknown, attempt: number): number {
+    let delay = RATE_LIMIT_BASE_DELAY_MS * attempt
+    if (typeof retryAfter === 'string' && retryAfter.trim() !== '') {
+      const seconds = Number(retryAfter)
+      const date = Date.parse(retryAfter)
+      if (Number.isFinite(seconds)) {
+        delay = seconds * 1000
+      } else if (!Number.isNaN(date)) {
+        delay = date - Date.now()
+      }
+    }
+    return Math.min(Math.max(0, delay), RATE_LIMIT_MAX_DELAY_MS)
+  }
+
+  /**
+   * Wait for the given time, stopping early when the download is cancelled or aborted
+   */
+  private static async waitUnlessCancelled(
+    ms: number,
+    signal: AbortSignal,
+    isCancelled: () => boolean
   ): Promise<void> {
-    const completedChunks = new Set<number>()
-    let totalDownloaded = 0
-    const startTime = Date.now()
-    
-    const promises = chunks.map(async (chunk) => {
-      try {
-        
-        // Download chunk with byte range
-        const response = await axios({
-          method: 'GET',
-          url: url,
-          responseType: 'stream',
-          headers: {
-            Range: `bytes=${chunk.start}-${chunk.end}`,
-          },
-        })
-        
-        // Write chunk to file
-        const writer = createWriteStream(chunk.filePath)
-        
-        // Track progress for this chunk
-        let downloaded = 0
-        const chunkSize = chunk.end - chunk.start + 1
-        
-        response.data.on('data', (data: Buffer) => {
-          downloaded += data.length
-          totalDownloaded += data.length
-          
-          // Calculate download speed (bytes per second)
-          const elapsedSeconds = (Date.now() - startTime) / 1000
-          const downloadSpeed = elapsedSeconds > 0 ? totalDownloaded / elapsedSeconds : 0
-          
-          const progress = (downloaded / chunkSize) * 100
-          
-          // Update progress every 10%
-          if (progress % 10 < 1 || progress === 100) {
-            completedChunks.add(chunk.chunkIndex)
-            const overallProgress = Math.floor((totalDownloaded / totalFileSize) * 100)
-            queue.updateProgress(queueItemId, overallProgress, downloadSpeed, totalFileSize)
-          }
-        })
-        
-        response.data.pipe(writer)
-        
-        // Wait for write to complete
-        await new Promise<void>((resolve, reject) => {
-          writer.on('finish', () => {
-            completedChunks.add(chunk.chunkIndex)
-            resolve()
-          })
-          writer.on('error', reject)
-        })
-        
-      } catch (error) {
-        console.error(`Error downloading chunk ${chunk.chunkIndex}:`, error)
-        throw error
+    const until = Date.now() + ms
+    while (Date.now() < until) {
+      if (signal.aborted || isCancelled()) {
+        throw new DownloadCancelledError()
       }
-    })
-    
-    // Wait for all chunks to download
-    await Promise.all(promises)
-  }
-  
-  /**
-   * Merge downloaded chunks into single file
-   */
-  private static async mergeChunks(chunks: DownloadChunk[], outputPath: string): Promise<void> {
-    const writeStream = await fs.open(outputPath, 'w')
-    
-    try {
-      for (const chunk of chunks.sort((a, b) => a.chunkIndex - b.chunkIndex)) {
-        const chunkData = await fs.readFile(chunk.filePath)
-        await writeStream.write(chunkData)
-      }
-    } finally {
-      await writeStream.close()
+      await new Promise((resolve) => setTimeout(resolve, Math.min(250, until - Date.now())))
     }
+  }
+
+  /**
+   * Download the file in segments taken from a shared queue by N workers,
+   * writing each one at its offset in the output file.
+   * A slow connection only holds up its own segment, and a failed segment is retried alone.
+   * @returns false if the download was cancelled
+   */
+  private static async downloadSegments(
+    url: string,
+    outputPath: string,
+    fileSize: number,
+    maxWorkers: number,
+    queue: ReturnType<typeof getDownloadQueue>,
+    queueItemId: string
+  ): Promise<boolean> {
+    const segments = this.splitIntoSegments(fileSize, maxWorkers)
+
+    // Stops the other workers when one fails or the download is cancelled
+    const controller = new AbortController()
+    const counters: DownloadCounters = { valid: 0, speed: new SpeedMeter(SPEED_WINDOW_MS) }
+    let nextSegment = 0
+
+    // Sent on a timer and not on incoming data, so the speed drops to 0 when the download stalls
+    const reportProgress = () => {
+      const progress = Math.floor((counters.valid / fileSize) * 100)
+      queue.updateProgress(queueItemId, progress, counters.speed.speed(), fileSize)
+    }
+
+    // Allocate the whole file up front, so every worker can write at its own offset
+    const handle = await fs.open(outputPath, 'w')
+    const progressTimer = setInterval(reportProgress, PROGRESS_INTERVAL_MS)
+    try {
+      await handle.truncate(fileSize)
+
+      const worker = async () => {
+        while (!controller.signal.aborted && nextSegment < segments.length) {
+          const segment = segments[nextSegment++]
+          try {
+            await this.downloadSegmentWithRetry(
+              url,
+              segment,
+              fileSize,
+              handle,
+              controller.signal,
+              () => this.isCancelled(queueItemId),
+              counters
+            )
+          } catch (error) {
+            controller.abort()
+            throw error
+          }
+        }
+      }
+
+      const workerCount = Math.max(1, Math.min(maxWorkers, segments.length))
+      const results = await Promise.allSettled(Array.from({ length: workerCount }, worker))
+
+      if (this.isCancelled(queueItemId)) {
+        return false
+      }
+      const failed = results.find(
+        (result): result is PromiseRejectedResult =>
+          result.status === 'rejected' && !(result.reason instanceof DownloadCancelledError)
+      )
+      if (failed) {
+        throw failed.reason
+      }
+      reportProgress()
+      return true
+    } finally {
+      clearInterval(progressTimer)
+      await handle.close()
+    }
+  }
+
+  /**
+   * Download one segment, retrying it when the request fails or the data is incomplete
+   */
+  private static async downloadSegmentWithRetry(
+    url: string,
+    segment: DownloadSegment,
+    fileSize: number,
+    handle: FileHandle,
+    signal: AbortSignal,
+    isCancelled: () => boolean,
+    counters: DownloadCounters
+  ): Promise<void> {
+    for (let attempt = 1; ; attempt++) {
+      let received = 0
+      try {
+        await this.downloadSegment(url, segment, fileSize, handle, signal, isCancelled, (bytes) => {
+          received += bytes
+          counters.valid += bytes
+          counters.speed.add(bytes)
+        })
+        return
+      } catch (error) {
+        // Bytes of the failed attempt are downloaded again: out of the progress, not of the speed
+        counters.valid -= received
+        if (error instanceof DownloadCancelledError || signal.aborted) {
+          throw error instanceof DownloadCancelledError ? error : new DownloadCancelledError()
+        }
+        if (error instanceof SegmentNotSupportedError) {
+          throw error
+        }
+        const rateLimited = axios.isAxiosError(error) && error.response?.status === 429
+        if (axios.isAxiosError(error)) {
+          // Error responses of a stream request keep the body open
+          error.response?.data?.destroy?.()
+        }
+        if (attempt >= MAX_SEGMENT_ATTEMPTS) {
+          throw new Error(
+            `Segmento ${segment.start}-${segment.end} non scaricato dopo ${attempt} tentativi: ${
+              error instanceof Error ? error.message : error
+            }`
+          )
+        }
+        if (rateLimited) {
+          const delay = this.rateLimitDelay(
+            (error as AxiosError).response?.headers['retry-after'],
+            attempt
+          )
+          logger.warning(
+            'DownloadTask',
+            `Troppe richieste al server (429): nuovo tentativo del segmento ${segment.start}-${segment.end} tra ${Math.round(delay / 1000)}s`
+          )
+          await this.waitUnlessCancelled(delay, signal, isCancelled)
+          continue
+        }
+        logger.warning(
+          'DownloadTask',
+          `Segmento ${segment.start}-${segment.end} fallito (tentativo ${attempt}/${MAX_SEGMENT_ATTEMPTS}), nuovo tentativo`
+        )
+      }
+    }
+  }
+
+  /**
+   * Whether a Content-Range header ("bytes start-end/total", total may be "*") describes
+   * exactly the requested segment of a file of the given size
+   */
+  private static matchesContentRange(
+    contentRange: string,
+    segment: DownloadSegment,
+    fileSize: number
+  ): boolean {
+    const match = /^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i.exec(contentRange.trim())
+    return (
+      !!match &&
+      Number(match[1]) === segment.start &&
+      Number(match[2]) === segment.end &&
+      (match[3] === '*' || Number(match[3]) === fileSize)
+    )
+  }
+
+  /**
+   * Download one segment with a Range request and write it at its offset in the file
+   * @returns the number of bytes written
+   */
+  private static async downloadSegment(
+    url: string,
+    segment: DownloadSegment,
+    fileSize: number,
+    handle: FileHandle,
+    signal: AbortSignal,
+    isCancelled: () => boolean,
+    onData: (bytes: number) => void
+  ): Promise<number> {
+    if (isCancelled()) {
+      throw new DownloadCancelledError()
+    }
+
+    const response = await axios.get(url, {
+      responseType: 'stream',
+      headers: {
+        'Range': `bytes=${segment.start}-${segment.end}`,
+        // A compressed body would not match the requested byte range
+        'Accept-Encoding': 'identity',
+      },
+      signal,
+    })
+
+    // A 200 means the server ignored the Range header and is sending the whole file:
+    // fine only when this segment is the whole file
+    const wholeFile = segment.start === 0 && segment.end === fileSize - 1
+    if (response.status !== 206 && !(response.status === 200 && wholeFile)) {
+      response.data.destroy()
+      throw new SegmentNotSupportedError(
+        `Il server non supporta i download a segmenti (status ${response.status})`
+      )
+    }
+    const contentRange = response.headers['content-range']
+    if (
+      response.status === 206 &&
+      typeof contentRange === 'string' &&
+      !this.matchesContentRange(contentRange, segment, fileSize)
+    ) {
+      response.data.destroy()
+      throw new SegmentNotSupportedError(
+        `Content-Range inatteso: "${contentRange}" invece di "bytes ${segment.start}-${segment.end}/${fileSize}"`
+      )
+    }
+
+    const expectedBytes = segment.end - segment.start + 1
+    let written = 0
+    for await (const data of response.data as AsyncIterable<Buffer>) {
+      if (isCancelled()) {
+        response.data.destroy()
+        throw new DownloadCancelledError()
+      }
+      if (written + data.length > expectedBytes) {
+        response.data.destroy()
+        throw new Error(`Il segmento ha più byte del previsto (${expectedBytes})`)
+      }
+      await handle.write(data, 0, data.length, segment.start + written)
+      written += data.length
+      onData(data.length)
+    }
+
+    if (written !== expectedBytes) {
+      throw new Error(`Segmento incompleto: ricevuti ${written} byte su ${expectedBytes}`)
+    }
+    return written
   }
 
   /**

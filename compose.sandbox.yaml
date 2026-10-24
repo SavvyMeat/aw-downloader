@@ -36,17 +36,21 @@ services:
   fixtures-init:
     image: linuxserver/ffmpeg:9.0-cli-ls83
     # episode.mp4: what AW downloads. other.mp4: a longer (so bigger) video with the same
-    # quality, used by the tests as "another file" for the same episode/movie
+    # quality, used by the tests as "another file" for the same episode/movie.
+    # Constant 20 Mbit/s bitrate: about 25 MB, above the 5 MB minimum AW accepts and
+    # above one 16 MB segment, so the download goes through more than one Range request
     command: >-
       -y -loglevel error
       -f lavfi -i testsrc=duration=10:size=1280x720:rate=24
       -f lavfi -i sine=frequency=440:duration=10
       -f lavfi -i testsrc=duration=12:size=1280x720:rate=24
       -f lavfi -i sine=frequency=880:duration=12
-      -map 0 -map 1 -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -shortest
-      /fixtures/episode.mp4
-      -map 2 -map 3 -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -shortest
-      /fixtures/other.mp4
+      -map 0 -map 1 -c:v libx264 -preset veryfast -pix_fmt yuv420p
+      -b:v 20M -minrate 20M -maxrate 20M -bufsize 20M -x264-params nal-hrd=cbr
+      -c:a aac -shortest /fixtures/episode.mp4
+      -map 2 -map 3 -c:v libx264 -preset veryfast -pix_fmt yuv420p
+      -b:v 20M -minrate 20M -maxrate 20M -bufsize 20M -x264-params nal-hrd=cbr
+      -c:a aac -shortest /fixtures/other.mp4
     volumes:
       - fixtures:/fixtures
 
